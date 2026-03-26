@@ -73,6 +73,7 @@ export async function exportFullReportXlsx(
     total_markup_earned: number;
     gross_profit: number;
     losses_from_failed: number;
+    total_expenses: number;
     net_profit: number;
   }
 ) {
@@ -83,6 +84,7 @@ export async function exportFullReportXlsx(
     { Metric: 'Markup Earned', Value: summary.total_markup_earned },
     { Metric: 'Gross Profit', Value: summary.gross_profit },
     { Metric: 'Losses (Failed/Returned)', Value: summary.losses_from_failed },
+    { Metric: 'Expenses', Value: summary.total_expenses },
     { Metric: 'Net Profit', Value: summary.net_profit },
   ];
 

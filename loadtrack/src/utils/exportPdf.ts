@@ -132,7 +132,8 @@ export async function exportPaymentReceipt(payment: Payment) {
     } catch { /* ignore image errors */ }
   }
 
-  doc.save(`receipt-${payment.date}-${clientName.replace(/\s/g, '_')}.pdf`);
+  const safeName = clientName.replace(/[^a-zA-Z0-9_\- ]/g, '').replace(/\s+/g, '_');
+  doc.save(`receipt-${payment.date}-${safeName}.pdf`);
 }
 
 export async function exportProfitReportPdf(
@@ -143,6 +144,7 @@ export async function exportProfitReportPdf(
     total_markup_earned: number;
     gross_profit: number;
     losses_from_failed: number;
+    total_expenses: number;
     net_profit: number;
   }
 ) {
@@ -159,6 +161,7 @@ export async function exportProfitReportPdf(
       ['Markup Earned', formatPeso(summary.total_markup_earned)],
       ['Gross Profit', formatPeso(summary.gross_profit)],
       ['Losses (Failed/Returned)', formatPeso(summary.losses_from_failed)],
+      ['Expenses', formatPeso(summary.total_expenses)],
       ['Net Profit', formatPeso(summary.net_profit)],
     ],
     styles: { fontSize: 10, cellPadding: 4 },

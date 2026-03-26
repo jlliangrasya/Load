@@ -1,14 +1,24 @@
 import { useState } from 'react';
 import { Plus, Trash2, Package } from 'lucide-react';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { useCapital } from '../hooks/useCapital';
+import { db } from '../db/database';
 import { formatPeso } from '../utils/currency';
 import PageHeader from '../components/layout/PageHeader';
 import NetworkBadge from '../components/shared/NetworkBadge';
 import EmptyState from '../components/shared/EmptyState';
+import QuickAmounts from '../components/shared/QuickAmounts';
 import toast from 'react-hot-toast';
 
 export default function Capital() {
   const { capitals, addCapital, deleteCapital, smartBalance, globeBalance } = useCapital();
+  const settings = useLiveQuery(() => db.app_settings.get(1), []);
+  const discountEnabled = settings?.discount_enabled !== 0;
+  const discountRates = (settings?.discount_rates ?? '2,3,5')
+    .split(',')
+    .map(r => parseFloat(r.trim()) / 100)
+    .filter(r => !isNaN(r) && r > 0)
+    .map(r => 1 - r);
   const [showForm, setShowForm] = useState(false);
   const [network, setNetwork] = useState<'smart' | 'globe'>('smart');
   const [faceValue, setFaceValue] = useState('');
@@ -40,9 +50,15 @@ export default function Capital() {
   };
 
   const handleDelete = async (id: string) => {
-    await deleteCapital(id);
-    setConfirmDelete(null);
-    toast.success('Capital purchase deleted');
+    try {
+      await deleteCapital(id);
+      setConfirmDelete(null);
+      toast.success('Capital purchase deleted');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Delete failed';
+      toast.error(msg);
+      setConfirmDelete(null);
+    }
   };
 
   return (
@@ -104,6 +120,11 @@ export default function Capital() {
                 placeholder="e.g. 1000"
                 className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
+              <QuickAmounts
+                amounts={[500, 1000, 2000, 3000, 5000, 10000]}
+                onSelect={(a) => setFaceValue(String(a))}
+                selected={parseFloat(faceValue) || undefined}
+              />
             </div>
 
             <div>
@@ -116,6 +137,26 @@ export default function Capital() {
                 placeholder="e.g. 950"
                 className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
+              {discountEnabled && faceValue && discountRates.length > 0 && (
+                <div className="flex gap-1.5 mt-1 flex-wrap">
+                  {discountRates.map(ratio => {
+                    const suggested = Math.round(parseFloat(faceValue) * ratio);
+                    const pct = Math.round((1 - ratio) * 100);
+                    return (
+                      <button
+                        key={ratio}
+                        onClick={() => setCostPrice(String(suggested))}
+                        type="button"
+                        className={`px-2.5 py-1.5 rounded-lg text-[10px] font-medium ${
+                          costPrice === String(suggested) ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'
+                        }`}
+                      >
+                        {pct}% disc = ₱{suggested}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {(faceValue || costPrice) && (

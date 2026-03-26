@@ -1,9 +1,10 @@
-import type { CapitalPurchase, Disbursement, NetworkSummary, ProfitSummary } from '../types';
+import type { CapitalPurchase, Disbursement, Expense, NetworkSummary, ProfitSummary } from '../types';
 
 export function calculateProfitSummary(
   period: string,
   capitals: CapitalPurchase[],
-  disbursements: Disbursement[]
+  disbursements: Disbursement[],
+  expenses: Expense[] = []
 ): ProfitSummary {
   const successDisbursements = disbursements.filter(d => d.status === 'success');
   const failedDisbursements = disbursements.filter(d => d.status === 'failed' || d.status === 'returned');
@@ -14,7 +15,8 @@ export function calculateProfitSummary(
   const gross_profit = total_commission_earned + total_markup_earned;
   const total_gross_income = successDisbursements.reduce((sum, d) => sum + d.selling_price, 0);
   const losses_from_failed = failedDisbursements.reduce((sum, d) => sum + d.face_value, 0);
-  const net_profit = gross_profit - losses_from_failed;
+  const total_expenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+  const net_profit = gross_profit - losses_from_failed - total_expenses;
 
   function networkSummary(network: 'smart' | 'globe'): NetworkSummary {
     const netCapitals = capitals.filter(c => c.network === network);
@@ -37,6 +39,7 @@ export function calculateProfitSummary(
     total_gross_income,
     gross_profit,
     losses_from_failed,
+    total_expenses,
     net_profit,
     by_network: {
       smart: networkSummary('smart'),

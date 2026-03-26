@@ -13,6 +13,8 @@ import History from './pages/History';
 import Reports from './pages/Reports';
 import MapPage from './pages/Map';
 import Transactions from './pages/Transactions';
+import Collect from './pages/Collect';
+import Expenses from './pages/Expenses';
 import Settings from './pages/Settings';
 import { seedDatabase } from './db/seed';
 
@@ -49,6 +51,8 @@ export default function App() {
           <Route path="/reports" element={<Reports />} />
           <Route path="/map" element={<MapPage />} />
           <Route path="/transactions" element={<Transactions />} />
+          <Route path="/collect" element={<Collect />} />
+          <Route path="/expenses" element={<Expenses />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
         <BottomNav />

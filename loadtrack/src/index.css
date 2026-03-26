@@ -1,1 +1,12 @@
 @import "tailwindcss";
+
+/* Keep Leaflet map below sidebar/overlay z-index */
+.leaflet-container {
+  z-index: 0 !important;
+}
+.leaflet-pane,
+.leaflet-top,
+.leaflet-bottom,
+.leaflet-control {
+  z-index: auto !important;
+}

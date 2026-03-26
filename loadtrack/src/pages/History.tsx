@@ -1,7 +1,9 @@
 import { useState, useMemo } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Search, Filter, X, FileDown, FileSpreadsheet } from 'lucide-react';
+import { Search, Filter, X, FileDown, FileSpreadsheet, Trash2 } from 'lucide-react';
 import { db } from '../db/database';
+import { useDisbursements } from '../hooks/useDisbursements';
+import { usePayments } from '../hooks/usePayments';
 import { formatPeso } from '../utils/currency';
 import { exportDisbursementsPdf, exportPaymentsPdf, exportPaymentReceipt } from '../utils/exportPdf';
 import { exportDisbursementsXlsx, exportPaymentsXlsx } from '../utils/exportXlsx';
@@ -25,6 +27,10 @@ export default function History() {
   const [statusFilter, setStatusFilter] = useState<'' | 'success' | 'failed' | 'returned'>('');
   const [methodFilter, setMethodFilter] = useState<'' | 'cash' | 'gcash' | 'online_transfer'>('');
   const [signatureModal, setSignatureModal] = useState<{ image: string; date: string; amount: number } | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const { deleteDisbursement } = useDisbursements();
+  const { deletePayment } = usePayments();
 
   const disbursements = useLiveQuery(
     () => db.disbursements.orderBy('created_at').reverse().toArray(), []
@@ -45,6 +51,30 @@ export default function History() {
   const clearFilters = () => {
     setDateFrom(''); setDateTo(''); setNetworkFilter('');
     setClientSearch(''); setStatusFilter(''); setMethodFilter('');
+  };
+
+  const handleDeleteDisbursement = async (id: string) => {
+    try {
+      await deleteDisbursement(id);
+      setConfirmDeleteId(null);
+      toast.success('Disbursement deleted');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Delete failed';
+      toast.error(msg);
+      setConfirmDeleteId(null);
+    }
+  };
+
+  const handleDeletePayment = async (id: string) => {
+    try {
+      await deletePayment(id);
+      setConfirmDeleteId(null);
+      toast.success('Payment deleted');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Delete failed';
+      toast.error(msg);
+      setConfirmDeleteId(null);
+    }
   };
 
   const filteredDisbursements = useMemo(() => {
@@ -274,7 +304,15 @@ export default function History() {
                     <p className="text-sm font-medium text-gray-900">
                       {clientsMap?.[d.client_id]?.name ?? 'Unknown'}
                     </p>
-                    <span className="text-xs text-gray-500">{d.date}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">{d.date}</span>
+                      <button
+                        onClick={() => setConfirmDeleteId(d.id)}
+                        className="p-1 text-gray-400"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
@@ -288,6 +326,22 @@ export default function History() {
                   </div>
                   {d.failure_reason && (
                     <p className="text-xs text-red-500 mt-1">Reason: {d.failure_reason}</p>
+                  )}
+                  {confirmDeleteId === d.id && (
+                    <div className="mt-3 pt-3 border-t border-gray-200 flex gap-2">
+                      <button
+                        onClick={() => setConfirmDeleteId(null)}
+                        className="flex-1 py-2 rounded-lg border border-gray-300 text-gray-700 text-xs font-medium"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => handleDeleteDisbursement(d.id)}
+                        className="flex-1 py-2 rounded-lg bg-red-600 text-white text-xs font-medium"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   )}
                 </div>
               ))}
@@ -310,7 +364,15 @@ export default function History() {
                     <p className="text-sm font-medium text-gray-900">
                       {clientsMap?.[p.client_id]?.name ?? 'Unknown'}
                     </p>
-                    <span className="text-xs text-gray-500">{p.date}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">{p.date}</span>
+                      <button
+                        onClick={() => setConfirmDeleteId(p.id)}
+                        className="p-1 text-gray-400"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -338,6 +400,22 @@ export default function History() {
                       Download Receipt
                     </button>
                   </div>
+                  {confirmDeleteId === p.id && (
+                    <div className="mt-3 pt-3 border-t border-gray-200 flex gap-2">
+                      <button
+                        onClick={() => setConfirmDeleteId(null)}
+                        className="flex-1 py-2 rounded-lg border border-gray-300 text-gray-700 text-xs font-medium"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => handleDeletePayment(p.id)}
+                        className="flex-1 py-2 rounded-lg bg-red-600 text-white text-xs font-medium"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

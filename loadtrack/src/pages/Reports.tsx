@@ -24,6 +24,7 @@ export default function Reports() {
   const capitals = useLiveQuery(() => db.capital_purchases.toArray(), []);
   const allDisbursements = useLiveQuery(() => db.disbursements.toArray(), []);
   const allPayments = useLiveQuery(() => db.payments.toArray(), []);
+  const allExpenses = useLiveQuery(() => db.expenses.toArray(), []);
   const clientsMap = useLiveQuery(
     () => db.clients.toArray().then(cs => {
       const m: Record<string, Client> = {};
@@ -53,9 +54,14 @@ export default function Reports() {
     [allPayments, monthStartStr, monthEndStr]
   );
 
+  const monthExpenses = useMemo(
+    () => (allExpenses ?? []).filter(e => e.date >= monthStartStr && e.date <= monthEndStr),
+    [allExpenses, monthStartStr, monthEndStr]
+  );
+
   const summary = useMemo(
-    () => calculateProfitSummary(monthStr, monthCapitals, monthDisbursements),
-    [monthStr, monthCapitals, monthDisbursements]
+    () => calculateProfitSummary(monthStr, monthCapitals, monthDisbursements, monthExpenses),
+    [monthStr, monthCapitals, monthDisbursements, monthExpenses]
   );
 
   // Chart data: Smart vs Globe disbursements by network
@@ -147,6 +153,7 @@ export default function Reports() {
               <SummaryCard label="Markup Earned" value={formatPeso(summary.total_markup_earned)} color="text-green-600" />
               <SummaryCard label="Gross Income" value={formatPeso(summary.total_gross_income)} color="text-blue-600" />
               <SummaryCard label="Losses (Failed)" value={formatPeso(summary.losses_from_failed)} color="text-red-600" />
+              <SummaryCard label="Expenses" value={formatPeso(summary.total_expenses)} color="text-orange-600" />
               <SummaryCard label="Net Profit" value={formatPeso(summary.net_profit)} color={summary.net_profit >= 0 ? 'text-green-700' : 'text-red-700'} highlight />
             </div>
 

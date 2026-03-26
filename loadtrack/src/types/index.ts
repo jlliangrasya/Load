@@ -20,6 +20,7 @@ export interface Client {
   total_load_received: number;
   total_paid: number;
   outstanding_balance: number;
+  last_activity?: string;
   created_at: string;
   updated_at: string;
 }
@@ -47,6 +48,7 @@ export interface Payment {
   method: 'cash' | 'gcash' | 'online_transfer';
   reference_number?: string;
   signature_image: string;
+  disbursement_ids?: string[];
   notes?: string;
   created_at: string;
 }
@@ -55,8 +57,40 @@ export interface AppSettings {
   id: number;
   default_smart_markup: number;
   default_globe_markup: number;
+  auto_markup_enabled: number;
+  discount_enabled: number;
+  discount_rates: string;
+  hide_selling_if_equal: number;
   owner_name: string;
   business_name: string;
+}
+
+export interface CollectionItem {
+  id: string;
+  client_id: string;
+  amount: number;
+  collected: number;
+  signature_image?: string;
+  created_at: string;
+}
+
+export interface Expense {
+  id: string;
+  date: string;
+  category: string;
+  description: string;
+  amount: number;
+  created_at: string;
+}
+
+export interface CommissionLog {
+  id: string;
+  date: string;
+  network: 'smart' | 'globe';
+  old_rate: number;
+  new_rate: number;
+  notes?: string;
+  created_at: string;
 }
 
 export interface ProfitSummary {
@@ -67,6 +101,7 @@ export interface ProfitSummary {
   total_gross_income: number;
   gross_profit: number;
   losses_from_failed: number;
+  total_expenses: number;
   net_profit: number;
   by_network: {
     smart: NetworkSummary;

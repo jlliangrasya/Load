@@ -52,19 +52,33 @@ export function useCapital() {
     const batches = await db.capital_purchases
       .where('network').equals(network)
       .toArray();
-    const sorted = batches
+    return batches
       .filter(b => b.remaining_balance > 0)
-      .sort((a, b) => a.created_at.localeCompare(b.created_at));
-    return sorted[0] ?? null;
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))[0] ?? null;
   }
 
   async function deductFromBatch(batchId: string, amount: number) {
     await db.capital_purchases.where('id').equals(batchId).modify(batch => {
-      batch.remaining_balance -= amount;
+      batch.remaining_balance = Math.max(0, batch.remaining_balance - amount);
     });
   }
 
+  async function restoreToBatch(batchId: string, amount: number) {
+    await db.capital_purchases.where('id').equals(batchId).modify(batch => {
+      batch.remaining_balance += amount;
+    });
+  }
+
+  /** Returns true if capital has linked disbursements */
+  async function hasLinkedDisbursements(id: string): Promise<boolean> {
+    const count = await db.disbursements.where('capital_purchase_id').equals(id).count();
+    return count > 0;
+  }
+
   async function deleteCapital(id: string) {
+    if (await hasLinkedDisbursements(id)) {
+      throw new Error('Cannot delete capital with linked disbursements. Delete the disbursements first.');
+    }
     await db.capital_purchases.delete(id);
   }
 
@@ -75,6 +89,8 @@ export function useCapital() {
     addCapital,
     getOldestAvailableBatch,
     deductFromBatch,
+    restoreToBatch,
+    hasLinkedDisbursements,
     deleteCapital,
   };
 }

@@ -1,11 +1,15 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Wallet, Search } from 'lucide-react';
+import { Wallet, Search, ChevronDown, ChevronUp, Check } from 'lucide-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/database';
 import { usePayments } from '../hooks/usePayments';
 import { formatPeso } from '../utils/currency';
+import type { Disbursement } from '../types';
 import PageHeader from '../components/layout/PageHeader';
+import NetworkBadge from '../components/shared/NetworkBadge';
+import QuickAmounts from '../components/shared/QuickAmounts';
+import RecentClients from '../components/shared/RecentClients';
 import SignaturePad from '../components/signature/SignaturePad';
 import toast from 'react-hot-toast';
 
@@ -25,16 +29,55 @@ export default function Payments() {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [notes, setNotes] = useState('');
   const [showSignature, setShowSignature] = useState(false);
+  const [selectedDisbursementIds, setSelectedDisbursementIds] = useState<string[]>([]);
+  const [clientDisbursements, setClientDisbursements] = useState<Disbursement[]>([]);
+  const [showDisbursements, setShowDisbursements] = useState(false);
 
   const selectedClient = clients?.find(c => c.id === clientId);
   const filteredClients = clients?.filter(c =>
     c.name.toLowerCase().includes(clientSearch.toLowerCase())
   ) ?? [];
 
+  // Load unpaid disbursements when client changes
+  useEffect(() => {
+    if (!clientId) {
+      setClientDisbursements([]);
+      setSelectedDisbursementIds([]);
+      setShowDisbursements(false);
+      return;
+    }
+    db.disbursements.where('client_id').equals(clientId).toArray().then(disbs => {
+      setClientDisbursements(
+        disbs.filter(d => d.status === 'success').sort((a, b) => b.created_at.localeCompare(a.created_at))
+      );
+    });
+    setSelectedDisbursementIds([]);
+  }, [clientId]);
+
+  // Auto-fill amount from selected disbursements
+  useEffect(() => {
+    if (selectedDisbursementIds.length > 0) {
+      const total = clientDisbursements
+        .filter(d => selectedDisbursementIds.includes(d.id))
+        .reduce((s, d) => s + d.selling_price, 0);
+      setAmount(String(total));
+    }
+  }, [selectedDisbursementIds, clientDisbursements]);
+
+  const toggleDisbursement = (id: string) => {
+    setSelectedDisbursementIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
   const handleProceedToSignature = () => {
     if (!clientId) { toast.error('Please select a client'); return; }
     const amt = parseFloat(amount);
     if (!amt || amt <= 0) { toast.error('Please enter a valid amount'); return; }
+    if (selectedClient && amt > selectedClient.outstanding_balance && selectedClient.outstanding_balance > 0) {
+      toast.error(`Amount exceeds outstanding balance (${formatPeso(selectedClient.outstanding_balance)})`);
+      return;
+    }
     if ((method === 'gcash' || method === 'online_transfer') && !referenceNumber.trim()) {
       toast.error('Please enter a reference number');
       return;
@@ -43,19 +86,25 @@ export default function Payments() {
   };
 
   const handleSignatureConfirm = async (signatureDataUrl: string) => {
-    const amt = parseFloat(amount);
-    await addPayment({
-      client_id: clientId,
-      date,
-      amount: amt,
-      method,
-      reference_number: (method !== 'cash' && referenceNumber.trim()) ? referenceNumber.trim() : undefined,
-      signature_image: signatureDataUrl,
-      notes: notes.trim() || undefined,
-    });
-    toast.success('Payment recorded!');
-    setShowSignature(false);
-    navigate('/');
+    try {
+      const amt = parseFloat(amount);
+      await addPayment({
+        client_id: clientId,
+        date,
+        amount: amt,
+        method,
+        reference_number: (method !== 'cash' && referenceNumber.trim()) ? referenceNumber.trim() : undefined,
+        signature_image: signatureDataUrl,
+        disbursement_ids: selectedDisbursementIds.length > 0 ? selectedDisbursementIds : undefined,
+        notes: notes.trim() || undefined,
+      });
+      toast.success('Payment recorded!');
+      setShowSignature(false);
+      navigate('/');
+    } catch {
+      toast.error('Failed to save payment. Please try again.');
+      setShowSignature(false);
+    }
   };
 
   if (showSignature) {
@@ -63,6 +112,8 @@ export default function Payments() {
       <SignaturePad
         onConfirm={handleSignatureConfirm}
         onCancel={() => setShowSignature(false)}
+        clientName={selectedClient?.name}
+        amount={amount ? formatPeso(parseFloat(amount)) : undefined}
       />
     );
   }
@@ -93,6 +144,10 @@ export default function Payments() {
               </button>
             </div>
           ) : (
+            <>
+            {!clientSearch && (
+              <RecentClients onSelect={(id) => { setClientId(id); setShowClientDropdown(false); setClientSearch(''); }} />
+            )}
             <div className="relative">
               <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
@@ -120,6 +175,7 @@ export default function Payments() {
                 </div>
               )}
             </div>
+          </>
           )}
         </div>
 
@@ -144,7 +200,70 @@ export default function Payments() {
               </button>
             )}
           </div>
+          <QuickAmounts
+            amounts={[100, 200, 500, 1000, 1500, 2000, 3000, 5000]}
+            onSelect={(a) => setAmount(String(a))}
+            selected={parseFloat(amount) || undefined}
+          />
         </div>
+
+        {/* Link to specific loads */}
+        {selectedClient && selectedClient.outstanding_balance > 0 && clientDisbursements.length > 0 && (
+          <div className="border border-gray-200 rounded-xl overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setShowDisbursements(!showDisbursements)}
+              className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 text-sm font-medium text-gray-700"
+            >
+              <span>Link to specific load(s) (optional)</span>
+              {showDisbursements ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            </button>
+            {showDisbursements && (
+              <div className="divide-y divide-gray-100 max-h-64 overflow-y-auto">
+                {clientDisbursements.map(d => {
+                  const isSelected = selectedDisbursementIds.includes(d.id);
+                  return (
+                    <button
+                      key={d.id}
+                      type="button"
+                      onClick={() => toggleDisbursement(d.id)}
+                      className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+                        isSelected ? 'bg-blue-50' : 'bg-white'
+                      }`}
+                    >
+                      <div className={`flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center ${
+                        isSelected ? 'bg-blue-600 border-blue-600' : 'border-gray-300'
+                      }`}>
+                        {isSelected && <Check size={12} className="text-white" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-500">{d.date}</span>
+                          <NetworkBadge network={d.network} />
+                        </div>
+                        <p className="text-sm font-semibold text-gray-900">{formatPeso(d.selling_price)}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+                {selectedDisbursementIds.length > 0 && (
+                  <div className="px-4 py-2 bg-blue-50 flex items-center justify-between">
+                    <span className="text-xs text-blue-700 font-medium">
+                      {selectedDisbursementIds.length} load(s) selected
+                    </span>
+                    <span className="text-sm font-bold text-blue-800">
+                      {formatPeso(
+                        clientDisbursements
+                          .filter(d => selectedDisbursementIds.includes(d.id))
+                          .reduce((s, d) => s + d.selling_price, 0)
+                      )}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Payment Method */}
         <div>

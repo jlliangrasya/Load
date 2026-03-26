@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, Users, SendHorizonal, Wallet, MapPin } from 'lucide-react';
+import { Plus, Search, Users, SendHorizonal, Wallet, MapPin, AlertTriangle } from 'lucide-react';
 import { useClients } from '../hooks/useClients';
 import { formatPeso } from '../utils/currency';
 import PageHeader from '../components/layout/PageHeader';
 import EmptyState from '../components/shared/EmptyState';
 import toast from 'react-hot-toast';
 
-type Filter = 'all' | 'with_balance' | 'fully_paid';
+type Filter = 'all' | 'with_balance' | 'fully_paid' | 'dormant';
 
 export default function Clients() {
   const navigate = useNavigate();
@@ -54,7 +54,8 @@ export default function Clients() {
     }
     navigator.geolocation.getCurrentPosition(
       pos => { setLat(pos.coords.latitude); setLng(pos.coords.longitude); toast.success('Location pinned!'); },
-      () => toast.error('Could not get location')
+      () => toast.error('Could not get location'),
+      { timeout: 15000, enableHighAccuracy: true }
     );
   };
 
@@ -85,15 +86,28 @@ export default function Clients() {
   };
 
   const handleDelete = async (id: string) => {
-    await deleteClient(id);
-    setConfirmDelete(null);
-    toast.success('Client deleted');
+    try {
+      await deleteClient(id);
+      setConfirmDelete(null);
+      toast.success('Client and all related records deleted');
+    } catch {
+      toast.error('Failed to delete client');
+      setConfirmDelete(null);
+    }
+  };
+
+  const isDormant = (client: typeof clients[0]) => {
+    if (!client.last_activity) return false;
+    const lastActive = new Date(client.last_activity).getTime();
+    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    return lastActive < thirtyDaysAgo && client.outstanding_balance > 0;
   };
 
   const filtered = clients.filter(c => {
     const matchesSearch = c.name.toLowerCase().includes(search.toLowerCase());
     if (filter === 'with_balance') return matchesSearch && c.outstanding_balance > 0;
     if (filter === 'fully_paid') return matchesSearch && c.outstanding_balance <= 0;
+    if (filter === 'dormant') return matchesSearch && isDormant(c);
     return matchesSearch;
   });
 
@@ -116,7 +130,7 @@ export default function Clients() {
 
         {/* Filters */}
         <div className="flex gap-2">
-          {(['all', 'with_balance', 'fully_paid'] as Filter[]).map(f => (
+          {(['all', 'with_balance', 'fully_paid', 'dormant'] as Filter[]).map(f => (
             <button
               key={f}
               onClick={() => setFilter(f)}
@@ -124,7 +138,7 @@ export default function Clients() {
                 filter === f ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'
               }`}
             >
-              {f === 'all' ? 'All' : f === 'with_balance' ? 'With Balance' : 'Fully Paid'}
+              {f === 'all' ? 'All' : f === 'with_balance' ? 'With Balance' : f === 'fully_paid' ? 'Fully Paid' : 'Dormant'}
             </button>
           ))}
         </div>
@@ -219,6 +233,12 @@ export default function Clients() {
                   <div>
                     <p className="text-sm font-semibold text-gray-900">{c.name}</p>
                     <p className="text-xs text-gray-500">{c.contact_number}</p>
+                    {isDormant(c) && (
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <AlertTriangle size={12} className="text-amber-500" />
+                        <span className="text-[10px] text-amber-600 font-medium">Dormant — no activity in 30+ days</span>
+                      </div>
+                    )}
                   </div>
                   <p className={`text-sm font-bold ${c.outstanding_balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
                     {c.outstanding_balance > 0 ? formatPeso(c.outstanding_balance) : 'Paid'}

@@ -1,13 +1,17 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { SendHorizonal, Wallet, X } from 'lucide-react';
+import { SendHorizonal, Wallet, X, Search, Trash2, Share2 } from 'lucide-react';
 import { db } from '../db/database';
 import { formatPeso } from '../utils/currency';
+import { generateClientStatement, shareClientStatement } from '../utils/statement';
+import { useDisbursements } from '../hooks/useDisbursements';
+import { usePayments } from '../hooks/usePayments';
 import PageHeader from '../components/layout/PageHeader';
 import NetworkBadge from '../components/shared/NetworkBadge';
 import StatusBadge from '../components/shared/StatusBadge';
 import PaymentMethodBadge from '../components/shared/PaymentMethodBadge';
 import EmptyState from '../components/shared/EmptyState';
+import toast from 'react-hot-toast';
 import type { Client, Disbursement, Payment } from '../types';
 
 type Tab = 'disbursements' | 'payments';
@@ -15,12 +19,19 @@ type Tab = 'disbursements' | 'payments';
 export default function ClientDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { deleteDisbursement } = useDisbursements();
+  const { deletePayment } = usePayments();
   const [client, setClient] = useState<Client | null>(null);
   const [disbursements, setDisbursements] = useState<Disbursement[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [tab, setTab] = useState<Tab>('disbursements');
   const [signatureModal, setSignatureModal] = useState<{ image: string; date: string; amount: number } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [confirmDeleteDisbursement, setConfirmDeleteDisbursement] = useState<string | null>(null);
+  const [confirmDeletePayment, setConfirmDeletePayment] = useState<string | null>(null);
+  const [disbursementSearch, setDisbursementSearch] = useState('');
+  const [paymentSearch, setPaymentSearch] = useState('');
 
   useEffect(() => {
     if (!id) return;
@@ -36,7 +47,59 @@ export default function ClientDetail() {
       setLoading(false);
     }
     load();
-  }, [id]);
+  }, [id, refreshKey]);
+
+  const filteredDisbursements = useMemo(() => {
+    const q = disbursementSearch.trim().toLowerCase();
+    if (!q) return disbursements;
+    return disbursements.filter(d =>
+      d.date.toLowerCase().includes(q) ||
+      d.selling_price.toString().includes(q) ||
+      d.face_value.toString().includes(q) ||
+      d.markup.toString().includes(q) ||
+      (d.network && d.network.toLowerCase().includes(q)) ||
+      (d.status && d.status.toLowerCase().includes(q)) ||
+      (d.notes && d.notes.toLowerCase().includes(q))
+    );
+  }, [disbursements, disbursementSearch]);
+
+  const filteredPayments = useMemo(() => {
+    const q = paymentSearch.trim().toLowerCase();
+    if (!q) return payments;
+    return payments.filter(p =>
+      p.date.toLowerCase().includes(q) ||
+      p.amount.toString().includes(q) ||
+      (p.method && p.method.toLowerCase().includes(q)) ||
+      (p.reference_number && p.reference_number.toLowerCase().includes(q)) ||
+      (p.notes && p.notes.toLowerCase().includes(q))
+    );
+  }, [payments, paymentSearch]);
+
+  const handleDeleteDisbursement = async (disbursementId: string) => {
+    try {
+      await deleteDisbursement(disbursementId);
+      setConfirmDeleteDisbursement(null);
+      toast.success('Disbursement deleted');
+      setRefreshKey(k => k + 1);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Delete failed';
+      toast.error(msg);
+      setConfirmDeleteDisbursement(null);
+    }
+  };
+
+  const handleDeletePayment = async (paymentId: string) => {
+    try {
+      await deletePayment(paymentId);
+      setConfirmDeletePayment(null);
+      toast.success('Payment deleted');
+      setRefreshKey(k => k + 1);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Delete failed';
+      toast.error(msg);
+      setConfirmDeletePayment(null);
+    }
+  };
 
   if (loading) {
     return (
@@ -110,6 +173,20 @@ export default function ClientDetail() {
             >
               <Wallet size={14} /> Pay
             </button>
+            <button
+              onClick={async () => {
+                try {
+                  const text = await generateClientStatement(client.id);
+                  const result = await shareClientStatement(text);
+                  if (result === 'shared') toast.success('Statement shared!');
+                  else if (result === 'copied') toast.success('Statement copied to clipboard!');
+                  else toast.error('Could not share statement');
+                } catch { toast.error('Failed to generate statement'); }
+              }}
+              className="flex-1 flex items-center justify-center gap-1 py-2.5 rounded-lg bg-gray-100 text-gray-700 text-xs font-semibold"
+            >
+              <Share2 size={14} /> Statement
+            </button>
           </div>
         </div>
 
@@ -142,29 +219,72 @@ export default function ClientDetail() {
               description="No load has been sent to this client yet."
             />
           ) : (
-            <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
-              {disbursements.map(d => (
-                <div key={d.id} className="px-4 py-3">
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2">
-                      <NetworkBadge network={d.network} />
-                      <StatusBadge status={d.status} />
+            <>
+              {/* Disbursement Search */}
+              <div className="relative">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  value={disbursementSearch}
+                  onChange={e => setDisbursementSearch(e.target.value)}
+                  placeholder="Filter by date, amount, network..."
+                  className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              {filteredDisbursements.length === 0 ? (
+                <p className="text-center text-gray-400 text-sm py-6">No disbursements match your filter.</p>
+              ) : (
+                <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
+                  {filteredDisbursements.map(d => (
+                    <div key={d.id} className="px-4 py-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <NetworkBadge network={d.network} />
+                          <StatusBadge status={d.status} />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-500">{d.date}</span>
+                          <button
+                            onClick={() => setConfirmDeleteDisbursement(d.id)}
+                            className="p-1 text-gray-400"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between mt-1">
+                        <div className="text-xs text-gray-500">
+                          Face: {formatPeso(d.face_value)} &middot; Markup: {formatPeso(d.markup)}
+                        </div>
+                        <p className="text-sm font-semibold text-gray-900">{formatPeso(d.selling_price)}</p>
+                      </div>
+                      {d.failure_reason && (
+                        <p className="text-xs text-red-500 mt-1">Reason: {d.failure_reason}</p>
+                      )}
+                      {d.notes && <p className="text-xs text-gray-400 mt-1">{d.notes}</p>}
+
+                      {/* Delete Confirmation */}
+                      {confirmDeleteDisbursement === d.id && (
+                        <div className="mt-3 pt-3 border-t border-gray-200 flex gap-2">
+                          <button
+                            onClick={() => setConfirmDeleteDisbursement(null)}
+                            className="flex-1 py-2 rounded-lg border border-gray-300 text-gray-700 text-xs font-medium"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={() => handleDeleteDisbursement(d.id)}
+                            className="flex-1 py-2 rounded-lg bg-red-600 text-white text-xs font-medium"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
                     </div>
-                    <span className="text-xs text-gray-500">{d.date}</span>
-                  </div>
-                  <div className="flex items-center justify-between mt-1">
-                    <div className="text-xs text-gray-500">
-                      Face: {formatPeso(d.face_value)} &middot; Markup: {formatPeso(d.markup)}
-                    </div>
-                    <p className="text-sm font-semibold text-gray-900">{formatPeso(d.selling_price)}</p>
-                  </div>
-                  {d.failure_reason && (
-                    <p className="text-xs text-red-500 mt-1">Reason: {d.failure_reason}</p>
-                  )}
-                  {d.notes && <p className="text-xs text-gray-400 mt-1">{d.notes}</p>}
+                  ))}
                 </div>
-              ))}
-            </div>
+              )}
+            </>
           )
         )}
 
@@ -177,31 +297,74 @@ export default function ClientDetail() {
               description="No payments have been recorded for this client."
             />
           ) : (
-            <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
-              {payments.map(p => (
-                <div key={p.id} className="px-4 py-3">
-                  <div className="flex items-center justify-between mb-1">
-                    <PaymentMethodBadge method={p.method} />
-                    <span className="text-xs text-gray-500">{p.date}</span>
-                  </div>
-                  <div className="flex items-center justify-between mt-1">
-                    <div>
-                      {p.reference_number && (
-                        <p className="text-xs text-gray-500">Ref: {p.reference_number}</p>
+            <>
+              {/* Payment Search */}
+              <div className="relative">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  value={paymentSearch}
+                  onChange={e => setPaymentSearch(e.target.value)}
+                  placeholder="Filter by date, amount, method..."
+                  className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              {filteredPayments.length === 0 ? (
+                <p className="text-center text-gray-400 text-sm py-6">No payments match your filter.</p>
+              ) : (
+                <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
+                  {filteredPayments.map(p => (
+                    <div key={p.id} className="px-4 py-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <PaymentMethodBadge method={p.method} />
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-500">{p.date}</span>
+                          <button
+                            onClick={() => setConfirmDeletePayment(p.id)}
+                            className="p-1 text-gray-400"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between mt-1">
+                        <div>
+                          {p.reference_number && (
+                            <p className="text-xs text-gray-500">Ref: {p.reference_number}</p>
+                          )}
+                        </div>
+                        <p className="text-sm font-semibold text-green-600">{formatPeso(p.amount)}</p>
+                      </div>
+                      <button
+                        onClick={() => setSignatureModal({ image: p.signature_image, date: p.date, amount: p.amount })}
+                        className="mt-2 text-xs text-blue-600 font-medium"
+                      >
+                        View Signature
+                      </button>
+                      {p.notes && <p className="text-xs text-gray-400 mt-1">{p.notes}</p>}
+
+                      {/* Delete Confirmation */}
+                      {confirmDeletePayment === p.id && (
+                        <div className="mt-3 pt-3 border-t border-gray-200 flex gap-2">
+                          <button
+                            onClick={() => setConfirmDeletePayment(null)}
+                            className="flex-1 py-2 rounded-lg border border-gray-300 text-gray-700 text-xs font-medium"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={() => handleDeletePayment(p.id)}
+                            className="flex-1 py-2 rounded-lg bg-red-600 text-white text-xs font-medium"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       )}
                     </div>
-                    <p className="text-sm font-semibold text-green-600">{formatPeso(p.amount)}</p>
-                  </div>
-                  <button
-                    onClick={() => setSignatureModal({ image: p.signature_image, date: p.date, amount: p.amount })}
-                    className="mt-2 text-xs text-blue-600 font-medium"
-                  >
-                    View Signature
-                  </button>
-                  {p.notes && <p className="text-xs text-gray-400 mt-1">{p.notes}</p>}
+                  ))}
                 </div>
-              ))}
-            </div>
+              )}
+            </>
           )
         )}
       </div>

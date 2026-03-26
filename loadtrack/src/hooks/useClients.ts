@@ -38,23 +38,22 @@ export function useClients() {
     await db.clients.update(id, { ...data, updated_at: new Date().toISOString() });
   }
 
+  /** Cascade delete: removes client + all their disbursements, payments, and collection items */
   async function deleteClient(id: string) {
-    await db.clients.delete(id);
-  }
-
-  async function addToOutstanding(clientId: string, amount: number) {
-    await db.clients.where('id').equals(clientId).modify(c => {
-      c.total_load_received += amount;
-      c.outstanding_balance = c.total_load_received - c.total_paid;
-      c.updated_at = new Date().toISOString();
-    });
-  }
-
-  async function addPaymentToClient(clientId: string, amount: number) {
-    await db.clients.where('id').equals(clientId).modify(c => {
-      c.total_paid += amount;
-      c.outstanding_balance = c.total_load_received - c.total_paid;
-      c.updated_at = new Date().toISOString();
+    await db.transaction('rw', [db.clients, db.disbursements, db.payments, db.collection_list], async () => {
+      // Restore capital for successful disbursements before deleting
+      const disbursements = await db.disbursements.where('client_id').equals(id).toArray();
+      for (const d of disbursements) {
+        if (d.status === 'success') {
+          await db.capital_purchases.where('id').equals(d.capital_purchase_id).modify(batch => {
+            batch.remaining_balance += d.face_value;
+          });
+        }
+      }
+      await db.disbursements.where('client_id').equals(id).delete();
+      await db.payments.where('client_id').equals(id).delete();
+      await db.collection_list.where('client_id').equals(id).delete();
+      await db.clients.delete(id);
     });
   }
 
@@ -67,8 +66,6 @@ export function useClients() {
     addClient,
     updateClient,
     deleteClient,
-    addToOutstanding,
-    addPaymentToClient,
     getClient,
   };
 }

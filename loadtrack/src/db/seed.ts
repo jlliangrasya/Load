@@ -1,6 +1,6 @@
 import { db } from './database';
 import { v4 as uuid } from 'uuid';
-import type { CapitalPurchase, Client, Disbursement, Payment, AppSettings } from '../types';
+import type { CapitalPurchase, Client, Disbursement, Payment, AppSettings, Expense } from '../types';
 
 const PLACEHOLDER_SIGNATURE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
@@ -18,6 +18,10 @@ export async function seedDatabase() {
     id: 1,
     default_smart_markup: 2,
     default_globe_markup: 2,
+    auto_markup_enabled: 1,
+    discount_enabled: 1,
+    discount_rates: '2,3,5',
+    hide_selling_if_equal: 0,
     owner_name: 'Juan',
     business_name: 'Juan Load Center',
   };
@@ -166,4 +170,24 @@ export async function seedDatabase() {
     },
   ];
   await db.payments.bulkAdd(payments);
+
+  // Expenses (3 samples)
+  const expenses: Expense[] = [
+    {
+      id: uuid(), date: yesterday, category: 'Transport',
+      description: 'Jeepney fare for collection rounds', amount: 150,
+      created_at: new Date(Date.now() - 86000000).toISOString(),
+    },
+    {
+      id: uuid(), date: today, category: 'Fees',
+      description: 'GCash cash-in fee', amount: 25,
+      created_at: new Date(Date.now() - 1800000).toISOString(),
+    },
+    {
+      id: uuid(), date: twoDaysAgo, category: 'Supplies',
+      description: 'Receipt notebook', amount: 45,
+      created_at: new Date(Date.now() - 170000000).toISOString(),
+    },
+  ];
+  await db.expenses.bulkAdd(expenses);
 }

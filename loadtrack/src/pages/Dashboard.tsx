@@ -58,6 +58,8 @@ export default function Dashboard() {
     []
   );
 
+  const clients = useLiveQuery(() => db.clients.toArray(), []);
+
   const clientsMap = useLiveQuery(
     () => db.clients.toArray().then(cs => {
       const map: Record<string, Client> = {};
@@ -148,29 +150,63 @@ export default function Dashboard() {
           </button>
         </div>
 
+        {/* Quick Client Access */}
+        {clients && clients.length > 0 && (
+          <div>
+            <h2 className="text-sm font-semibold text-gray-700 mb-2">Quick Disburse</h2>
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {clients
+                .sort((a, b) => (b.last_activity ?? b.updated_at).localeCompare(a.last_activity ?? a.updated_at))
+                .slice(0, 6)
+                .map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => navigate(`/disburse?client=${c.id}`)}
+                    className="flex-shrink-0 bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-center active:bg-gray-50 min-w-[80px]"
+                  >
+                    <p className="text-xs font-semibold text-gray-900 truncate">{c.name.split(' ')[0]}</p>
+                    <p className={`text-[10px] mt-0.5 ${c.outstanding_balance > 0 ? 'text-red-500' : 'text-green-500'}`}>
+                      {c.outstanding_balance > 0 ? '₱' + c.outstanding_balance.toLocaleString() : '✓'}
+                    </p>
+                  </button>
+                ))}
+            </div>
+          </div>
+        )}
+
         {/* Recent Disbursements */}
         <div>
           <h2 className="text-sm font-semibold text-gray-700 mb-2">Recent Disbursements</h2>
           {recentDisbursements && recentDisbursements.length > 0 ? (
-            <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
-              {recentDisbursements.map(d => (
-                <div key={d.id} className="px-4 py-3 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">
-                      {clientsMap?.[d.client_id]?.name ?? 'Unknown'}
-                    </p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <NetworkBadge network={d.network} />
-                      <StatusBadge status={d.status} />
+            <>
+              <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
+                {recentDisbursements.slice(0, 5).map(d => (
+                  <div key={d.id} className="px-4 py-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">
+                        {clientsMap?.[d.client_id]?.name ?? 'Unknown'}
+                      </p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <NetworkBadge network={d.network} />
+                        <StatusBadge status={d.status} />
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold text-gray-900">{formatPeso(d.selling_price)}</p>
+                      <p className="text-xs text-gray-500">{d.date}</p>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm font-semibold text-gray-900">{formatPeso(d.selling_price)}</p>
-                    <p className="text-xs text-gray-500">{d.date}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+              {recentDisbursements.length > 5 && (
+                <button
+                  onClick={() => navigate('/transactions')}
+                  className="w-full text-center py-2 text-xs text-blue-600 font-medium"
+                >
+                  View all {recentDisbursements.length} disbursements →
+                </button>
+              )}
+            </>
           ) : (
             <p className="text-sm text-gray-400 text-center py-4">No disbursements yet</p>
           )}
@@ -180,22 +216,32 @@ export default function Dashboard() {
         <div>
           <h2 className="text-sm font-semibold text-gray-700 mb-2">Recent Payments</h2>
           {recentPayments && recentPayments.length > 0 ? (
-            <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
-              {recentPayments.map(p => (
-                <div key={p.id} className="px-4 py-3 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">
-                      {clientsMap?.[p.client_id]?.name ?? 'Unknown'}
-                    </p>
-                    <PaymentMethodBadge method={p.method} />
+            <>
+              <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
+                {recentPayments.slice(0, 5).map(p => (
+                  <div key={p.id} className="px-4 py-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">
+                        {clientsMap?.[p.client_id]?.name ?? 'Unknown'}
+                      </p>
+                      <PaymentMethodBadge method={p.method} />
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold text-green-600">{formatPeso(p.amount)}</p>
+                      <p className="text-xs text-gray-500">{p.date}</p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm font-semibold text-green-600">{formatPeso(p.amount)}</p>
-                    <p className="text-xs text-gray-500">{p.date}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+              {recentPayments.length > 5 && (
+                <button
+                  onClick={() => navigate('/transactions')}
+                  className="w-full text-center py-2 text-xs text-green-600 font-medium"
+                >
+                  View all {recentPayments.length} payments →
+                </button>
+              )}
+            </>
           ) : (
             <p className="text-sm text-gray-400 text-center py-4">No payments yet</p>
           )}

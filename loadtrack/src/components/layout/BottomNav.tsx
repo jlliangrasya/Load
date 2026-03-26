@@ -1,7 +1,7 @@
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, SendHorizonal, Wallet, MoreHorizontal, X,
-  ArrowLeftRight, ShoppingCart, AlertCircle, Clock, BarChart3, MapPin, Settings,
+  ArrowLeftRight, ClipboardList, ShoppingCart, AlertCircle, Clock, BarChart3, MapPin, Receipt, Settings,
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -14,8 +14,10 @@ const mainTabs = [
 
 const moreTabs = [
   { path: '/transactions', label: 'Transactions', icon: ArrowLeftRight },
+  { path: '/collect', label: 'To Collect', icon: ClipboardList },
   { path: '/capital', label: 'Capital', icon: ShoppingCart },
   { path: '/unpaid', label: 'Unpaid', icon: AlertCircle },
+  { path: '/expenses', label: 'Expenses', icon: Receipt },
   { path: '/history', label: 'History', icon: Clock },
   { path: '/reports', label: 'Reports', icon: BarChart3 },
   { path: '/map', label: 'Map', icon: MapPin },
