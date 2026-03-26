@@ -12,6 +12,7 @@ import UnpaidList from './pages/UnpaidList';
 import History from './pages/History';
 import Reports from './pages/Reports';
 import MapPage from './pages/Map';
+import Transactions from './pages/Transactions';
 import Settings from './pages/Settings';
 import { seedDatabase } from './db/seed';
 
@@ -47,6 +48,7 @@ export default function App() {
           <Route path="/history" element={<History />} />
           <Route path="/reports" element={<Reports />} />
           <Route path="/map" element={<MapPage />} />
+          <Route path="/transactions" element={<Transactions />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
         <BottomNav />
