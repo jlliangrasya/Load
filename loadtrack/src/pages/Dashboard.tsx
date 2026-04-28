@@ -34,11 +34,12 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchData();
+    const r = Math.random();
     const channels = [
-      supabase.channel('dash-capital').on('postgres_changes', { event: '*', schema: 'public', table: 'capital_purchases' }, fetchData).subscribe(),
-      supabase.channel('dash-clients').on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, fetchData).subscribe(),
-      supabase.channel('dash-disbs').on('postgres_changes', { event: '*', schema: 'public', table: 'disbursements' }, fetchData).subscribe(),
-      supabase.channel('dash-pays').on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, fetchData).subscribe(),
+      supabase.channel(`dash-capital-${r}`).on('postgres_changes', { event: '*', schema: 'public', table: 'capital_purchases' }, fetchData).subscribe(),
+      supabase.channel(`dash-clients-${r}`).on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, fetchData).subscribe(),
+      supabase.channel(`dash-disbs-${r}`).on('postgres_changes', { event: '*', schema: 'public', table: 'disbursements' }, fetchData).subscribe(),
+      supabase.channel(`dash-pays-${r}`).on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, fetchData).subscribe(),
     ];
     return () => { channels.forEach(c => supabase.removeChannel(c)); };
   }, [fetchData]);

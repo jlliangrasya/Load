@@ -17,7 +17,7 @@ export function useClients() {
   useEffect(() => {
     fetchClients();
     const channel = supabase
-      .channel('clients')
+      .channel(`clients-${Math.random()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, fetchClients)
       .subscribe();
     return () => { supabase.removeChannel(channel); };

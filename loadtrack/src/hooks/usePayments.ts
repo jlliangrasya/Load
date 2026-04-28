@@ -18,7 +18,7 @@ export function usePayments() {
   useEffect(() => {
     fetchPayments();
     const channel = supabase
-      .channel('payments')
+      .channel(`payments-${Math.random()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, fetchPayments)
       .subscribe();
     return () => { supabase.removeChannel(channel); };

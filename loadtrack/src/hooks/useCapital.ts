@@ -24,7 +24,7 @@ export function useCapital() {
   useEffect(() => {
     fetchCapitals();
     const channel = supabase
-      .channel('capital_purchases')
+      .channel(`capital_purchases-${Math.random()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'capital_purchases' }, fetchCapitals)
       .subscribe();
     return () => { supabase.removeChannel(channel); };

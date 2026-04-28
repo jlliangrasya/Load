@@ -52,8 +52,9 @@ export default function Collect() {
   useEffect(() => {
     refreshItems();
     refreshClients();
-    const ch1 = supabase.channel('collect-list').on('postgres_changes', { event: '*', schema: 'public', table: 'collection_list' }, refreshItems).subscribe();
-    const ch2 = supabase.channel('collect-clients').on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, refreshClients).subscribe();
+    const r = Math.random();
+    const ch1 = supabase.channel(`collect-list-${r}`).on('postgres_changes', { event: '*', schema: 'public', table: 'collection_list' }, refreshItems).subscribe();
+    const ch2 = supabase.channel(`collect-clients-${r}`).on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, refreshClients).subscribe();
     return () => { supabase.removeChannel(ch1); supabase.removeChannel(ch2); };
   }, [refreshItems, refreshClients]);
 
