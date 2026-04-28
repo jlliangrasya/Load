@@ -1,13 +1,28 @@
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, recalculateClientBalance, touchClientActivity } from '../db/database';
+import { useState, useEffect, useCallback } from 'react';
+import { supabase } from '../lib/supabase';
+import { recalculateClientBalance, touchClientActivity } from '../db/database';
 import type { Payment } from '../types';
 import { v4 as uuid } from 'uuid';
 
 export function usePayments() {
-  const payments = useLiveQuery(
-    () => db.payments.orderBy('created_at').reverse().toArray(),
-    []
-  );
+  const [payments, setPayments] = useState<Payment[]>([]);
+
+  const fetchPayments = useCallback(async () => {
+    const { data } = await supabase
+      .from('payments')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (data) setPayments(data as Payment[]);
+  }, []);
+
+  useEffect(() => {
+    fetchPayments();
+    const channel = supabase
+      .channel('payments')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, fetchPayments)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [fetchPayments]);
 
   async function addPayment(data: {
     client_id: string;
@@ -33,38 +48,34 @@ export function usePayments() {
       created_at: now,
     };
 
-    await db.transaction('rw', [db.payments, db.clients], async () => {
-      await db.payments.add(payment);
-      await db.clients.where('id').equals(data.client_id).modify(c => {
-        c.total_paid += data.amount;
-        c.outstanding_balance = c.total_load_received - c.total_paid;
-        c.updated_at = now;
-      });
-    });
-
+    await supabase.from('payments').insert(payment);
+    await recalculateClientBalance(data.client_id);
     await touchClientActivity(data.client_id);
+    await fetchPayments();
     return payment;
   }
 
-  /** Delete a payment and recalculate client balance from source of truth */
   async function deletePayment(id: string) {
-    const p = await db.payments.get(id);
+    const { data: p } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('id', id)
+      .single();
     if (!p) return;
 
-    await db.transaction('rw', [db.payments, db.clients], async () => {
-      await db.payments.delete(id);
-      await recalculateClientBalance(p.client_id);
-    });
+    await supabase.from('payments').delete().eq('id', id);
+    await recalculateClientBalance(p.client_id);
+    await fetchPayments();
   }
 
-  async function getPaymentsByClient(clientId: string) {
-    return db.payments.where('client_id').equals(clientId).reverse().sortBy('created_at');
+  async function getPaymentsByClient(clientId: string): Promise<Payment[]> {
+    const { data } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('client_id', clientId)
+      .order('created_at', { ascending: false });
+    return (data ?? []) as Payment[];
   }
 
-  return {
-    payments: payments ?? [],
-    addPayment,
-    deletePayment,
-    getPaymentsByClient,
-  };
+  return { payments, addPayment, deletePayment, getPaymentsByClient };
 }

@@ -2,9 +2,9 @@ import { useMemo, useState, useRef, useCallback, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { Share2, MapPin, Search, X, Navigation } from 'lucide-react';
-import { db } from '../db/database';
+import { supabase } from '../lib/supabase';
+import { useClients } from '../hooks/useClients';
 import { formatPeso } from '../utils/currency';
 import PageHeader from '../components/layout/PageHeader';
 import toast from 'react-hot-toast';
@@ -76,7 +76,8 @@ export default function MapPage() {
 }
 
 function FullMapView() {
-  const clients = useLiveQuery(() => db.clients.toArray(), []);
+  const { clients: allClients } = useClients();
+  const clients = allClients.length > 0 ? allClients : undefined;
   const [search, setSearch] = useState('');
   const [showResults, setShowResults] = useState(false);
   const [flyTarget, setFlyTarget] = useState<{ id: string; lat: number; lng: number } | null>(null);
@@ -141,11 +142,11 @@ function FullMapView() {
     }
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
-        await db.clients.update(client.id, {
+        await supabase.from('clients').update({
           latitude: pos.coords.latitude,
           longitude: pos.coords.longitude,
           updated_at: new Date().toISOString(),
-        });
+        }).eq('id', client.id);
         toast.success(`Location pinned for ${client.name}`);
       },
       () => toast.error('Could not get location'),

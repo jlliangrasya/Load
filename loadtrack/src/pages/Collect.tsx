@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { useNavigate } from 'react-router-dom';
 import { Trash2, CheckCircle, ClipboardList, PenTool, ChevronDown, ChevronUp, CheckSquare, Square } from 'lucide-react';
 import { v4 as uuid } from 'uuid';
-import { db } from '../db/database';
+import { supabase } from '../lib/supabase';
+import { recalculateClientBalance } from '../db/database';
+import { useSignatureUpload } from '../hooks/useSignatureUpload';
 import { formatPeso } from '../utils/currency';
 import PageHeader from '../components/layout/PageHeader';
 import SignaturePad from '../components/signature/SignaturePad';
@@ -16,7 +17,9 @@ import type { Client, Disbursement, Payment } from '../types';
 
 export default function Collect() {
   const navigate = useNavigate();
+  const { processSignature, canSave } = useSignatureUpload();
   const [confirmClear, setConfirmClear] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [signingItemId, setSigningItemId] = useState<string | null>(null);
   const [payAmounts, setPayAmounts] = useState<Record<string, string>>({});
   const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
@@ -29,18 +32,30 @@ export default function Collect() {
   const [bulkQueue, setBulkQueue] = useState<string[]>([]);
   const [isBulkCollecting, setIsBulkCollecting] = useState(false);
 
-  const items = useLiveQuery(
-    () => db.collection_list.orderBy('created_at').toArray(),
-    []
-  );
+  const [items, setItems] = useState<{ id: string; client_id: string; amount: number; collected: number; signature_image?: string; created_at: string }[] | undefined>(undefined);
+  const [clientsMap, setClientsMap] = useState<Record<string, Client>>({});
 
-  const clientsMap = useLiveQuery(
-    () => db.clients.toArray().then(cs => {
+  const refreshItems = useCallback(async () => {
+    const { data } = await supabase.from('collection_list').select('*').order('created_at', { ascending: true });
+    if (data) setItems(data);
+  }, []);
+
+  const refreshClients = useCallback(async () => {
+    const { data } = await supabase.from('clients').select('*');
+    if (data) {
       const m: Record<string, Client> = {};
-      cs.forEach(c => { m[c.id] = c; });
-      return m;
-    }), []
-  );
+      (data as Client[]).forEach(c => { m[c.id] = c; });
+      setClientsMap(m);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshItems();
+    refreshClients();
+    const ch1 = supabase.channel('collect-list').on('postgres_changes', { event: '*', schema: 'public', table: 'collection_list' }, refreshItems).subscribe();
+    const ch2 = supabase.channel('collect-clients').on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, refreshClients).subscribe();
+    return () => { supabase.removeChannel(ch1); supabase.removeChannel(ch2); };
+  }, [refreshItems, refreshClients]);
 
   const pendingItems = items?.filter(i => !i.collected) ?? [];
   const collectedItems = items?.filter(i => i.collected) ?? [];
@@ -57,14 +72,9 @@ export default function Collect() {
       // update the collection item amount to match the live balance.
       if (liveBalance >= 0 && liveBalance !== item.amount) {
         if (liveBalance === 0) {
-          // Client is fully paid — mark as collected automatically
-          db.collection_list.update(item.id, { collected: 1, amount: 0 }).catch(err => {
-            console.error('Failed to auto-mark collected:', err);
-          });
+          supabase.from('collection_list').update({ collected: 1, amount: 0 }).eq('id', item.id).then(() => refreshItems());
         } else {
-          db.collection_list.update(item.id, { amount: liveBalance }).catch(err => {
-            console.error('Failed to sync collection amount:', err);
-          });
+          supabase.from('collection_list').update({ amount: liveBalance }).eq('id', item.id).then(() => refreshItems());
         }
       }
     });
@@ -85,11 +95,11 @@ export default function Collect() {
 
     setLoadingHistory(true);
     Promise.all([
-      db.disbursements.where('client_id').equals(item.client_id).toArray(),
-      db.payments.where('client_id').equals(item.client_id).toArray(),
-    ]).then(([disb, pay]) => {
-      setClientDisbursements(disb.sort((a, b) => b.created_at.localeCompare(a.created_at)));
-      setClientPayments(pay.sort((a, b) => b.created_at.localeCompare(a.created_at)));
+      supabase.from('disbursements').select('*').eq('client_id', item.client_id).order('created_at', { ascending: false }),
+      supabase.from('payments').select('*').eq('client_id', item.client_id).order('created_at', { ascending: false }),
+    ]).then(([{ data: disb }, { data: pay }]) => {
+      setClientDisbursements((disb ?? []) as Disbursement[]);
+      setClientPayments((pay ?? []) as Payment[]);
       setLoadingHistory(false);
     }).catch(err => {
       toast.error('Failed to load transaction history');
@@ -121,6 +131,10 @@ export default function Collect() {
   };
 
   const handleStartCollect = (itemId: string) => {
+    if (!canSave) {
+      toast.error('Connect Google Drive first in Settings to save signatures.');
+      return;
+    }
     const item = items?.find(i => i.id === itemId);
     if (!item) return;
     const effectiveMax = getEffectiveMax(item);
@@ -135,7 +149,8 @@ export default function Collect() {
 
   const handleClearList = async () => {
     try {
-      await db.collection_list.clear();
+      await supabase.from('collection_list').delete().neq('id', '');
+      await refreshItems();
       setConfirmClear(false);
       setSelectedIds(new Set());
       toast.success('Collection list cleared');
@@ -147,7 +162,8 @@ export default function Collect() {
 
   const handleRemoveItem = async (id: string) => {
     try {
-      await db.collection_list.delete(id);
+      await supabase.from('collection_list').delete().eq('id', id);
+      await refreshItems();
       setSelectedIds(prev => {
         const next = new Set(prev);
         next.delete(id);
@@ -162,12 +178,13 @@ export default function Collect() {
 
   const handleSignatureConfirm = async (signatureDataUrl: string) => {
     if (!signingItemId) return;
+    setSaving(true);
 
     try {
-      const item = await db.collection_list.get(signingItemId);
+      const { data: item } = await supabase.from('collection_list').select('*').eq('id', signingItemId).single();
       if (!item) { toast.error('Collection item not found'); return; }
 
-      const client = await db.clients.get(item.client_id);
+      const { data: client } = await supabase.from('clients').select('*').eq('id', item.client_id).single();
       if (!client) { toast.error('Client not found'); return; }
 
       const effectiveMax = client.outstanding_balance;
@@ -182,43 +199,47 @@ export default function Collect() {
       const today = new Date().toISOString().split('T')[0];
       const now = new Date().toISOString();
 
+      // Upload signature to Google Drive (falls back to base64 if not signed in)
+      const signatureRef = await processSignature(signatureDataUrl, client.name, 'collection');
+
       // Record the payment
-      await db.payments.add({
+      await supabase.from('payments').insert({
         id: uuid(),
         client_id: item.client_id,
         date: today,
         amount: payAmount,
         method: 'cash',
-        signature_image: signatureDataUrl,
+        signature_image: signatureRef,
         created_at: now,
       });
 
-      // Update client balance
-      await db.clients.where('id').equals(item.client_id).modify(c => {
-        c.total_paid += payAmount;
-        c.outstanding_balance = c.total_load_received - c.total_paid;
-        c.updated_at = now;
-      });
+      // Recalculate client balance from source of truth
+      await recalculateClientBalance(item.client_id);
+      await refreshClients();
 
       const remaining = effectiveMax - payAmount;
 
       if (remaining <= 0) {
-        // Fully paid -- mark as collected
-        await db.collection_list.update(signingItemId, {
-          collected: 1,
-          signature_image: signatureDataUrl,
-        });
+        await supabase.from('collection_list').update({ collected: 1, signature_image: signatureRef }).eq('id', signingItemId);
         toast.success(`${formatPeso(payAmount)} collected -- fully paid!`);
       } else {
-        // Partial -- update the remaining amount on the collection item
-        await db.collection_list.update(signingItemId, {
-          amount: remaining,
-        });
+        await supabase.from('collection_list').update({ amount: remaining }).eq('id', signingItemId);
         toast.success(`${formatPeso(payAmount)} collected -- ${formatPeso(remaining)} remaining`);
       }
+      await refreshItems();
+
     } catch (err) {
-      toast.error('Failed to process collection');
-      console.error(err);
+      const msg = err instanceof Error ? err.message : '';
+      if (msg === 'NOT_CONNECTED') {
+        toast.error('Connect Google Drive first in Settings.');
+      } else if (msg === 'OFFLINE') {
+        toast.error('No internet connection. Please try again when online.');
+      } else {
+        toast.error('Failed to process collection');
+        console.error(err);
+      }
+    } finally {
+      setSaving(false);
     }
 
     // Clean up signing state
@@ -277,6 +298,10 @@ export default function Collect() {
   };
 
   const handleCollectSelected = () => {
+    if (!canSave) {
+      toast.error('Connect Google Drive first in Settings to save signatures.');
+      return;
+    }
     const queue = pendingItems
       .filter(i => selectedIds.has(i.id))
       .filter(i => {
@@ -325,6 +350,13 @@ export default function Collect() {
             onCancel={isBulkCollecting ? handleCancelBulk : () => setSigningItemId(null)}
           />
         </div>
+        {saving && (
+          <div className="fixed inset-0 z-[100] bg-white/90 flex flex-col items-center justify-center gap-4">
+            <div className="w-12 h-12 border-4 border-green-600 border-t-transparent rounded-full animate-spin" />
+            <p className="text-lg font-semibold text-gray-800">Saving collection...</p>
+            <p className="text-sm text-gray-500">Please wait, don't close the app</p>
+          </div>
+        )}
       </div>
     );
   }

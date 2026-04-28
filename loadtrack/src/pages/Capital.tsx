@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, Trash2, Package } from 'lucide-react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { useCapital } from '../hooks/useCapital';
-import { db } from '../db/database';
+import { getSettingsWithDefaults } from '../db/database';
+import type { AppSettings } from '../types';
 import { formatPeso } from '../utils/currency';
 import PageHeader from '../components/layout/PageHeader';
 import NetworkBadge from '../components/shared/NetworkBadge';
@@ -12,7 +12,8 @@ import toast from 'react-hot-toast';
 
 export default function Capital() {
   const { capitals, addCapital, deleteCapital, smartBalance, globeBalance } = useCapital();
-  const settings = useLiveQuery(() => db.app_settings.get(1), []);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  useEffect(() => { getSettingsWithDefaults().then(s => setSettings(s as AppSettings)); }, []);
   const discountEnabled = settings?.discount_enabled !== 0;
   const discountRates = (settings?.discount_rates ?? '2,3,5')
     .split(',')

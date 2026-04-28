@@ -1,17 +1,17 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { formatPeso } from './currency';
-import { db } from '../db/database';
+import { supabase } from '../lib/supabase';
 import type { Disbursement, Payment } from '../types';
 
 async function getClientName(clientId: string): Promise<string> {
-  const c = await db.clients.get(clientId);
-  return c?.name ?? 'Unknown';
+  const { data } = await supabase.from('clients').select('name').eq('id', clientId).single();
+  return data?.name ?? 'Unknown';
 }
 
 async function getSettings() {
-  const s = await db.app_settings.get(1);
-  return { businessName: s?.business_name ?? 'LoadTrack', ownerName: s?.owner_name ?? '' };
+  const { data } = await supabase.from('app_settings').select('business_name, owner_name').eq('id', 1).single();
+  return { businessName: data?.business_name ?? 'LoadTrack', ownerName: data?.owner_name ?? '' };
 }
 
 function addHeader(doc: jsPDF, title: string, businessName: string) {
@@ -126,10 +126,13 @@ export async function exportPaymentReceipt(payment: Payment) {
   doc.setFont('helvetica', 'normal');
   doc.text('Signature:', 5, y);
 
-  if (payment.signature_image && payment.signature_image.length > 100) {
-    try {
-      doc.addImage(payment.signature_image, 'PNG', 5, y + 2, 65, 20);
-    } catch { /* ignore image errors */ }
+  if (payment.signature_image && payment.signature_image.startsWith('drive::')) {
+    doc.setFontSize(5);
+    doc.text('(Signature stored in Google Drive)', 5, y + 6);
+  } else if (payment.signature_image && payment.signature_image.startsWith('text-confirm::')) {
+    const parts = payment.signature_image.split('::');
+    doc.setFontSize(5);
+    doc.text(`Confirmed by: ${parts[1] || 'N/A'}`, 5, y + 6);
   }
 
   const safeName = clientName.replace(/[^a-zA-Z0-9_\- ]/g, '').replace(/\s+/g, '_');

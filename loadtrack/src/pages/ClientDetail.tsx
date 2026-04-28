@@ -1,12 +1,13 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { SendHorizonal, Wallet, X, Search, Trash2, Share2 } from 'lucide-react';
-import { db } from '../db/database';
+import { supabase } from '../lib/supabase';
 import { formatPeso } from '../utils/currency';
 import { generateClientStatement, shareClientStatement } from '../utils/statement';
 import { useDisbursements } from '../hooks/useDisbursements';
 import { usePayments } from '../hooks/usePayments';
 import PageHeader from '../components/layout/PageHeader';
+import SignatureImage from '../components/signature/SignatureImage';
 import NetworkBadge from '../components/shared/NetworkBadge';
 import StatusBadge from '../components/shared/StatusBadge';
 import PaymentMethodBadge from '../components/shared/PaymentMethodBadge';
@@ -36,13 +37,13 @@ export default function ClientDetail() {
   useEffect(() => {
     if (!id) return;
     async function load() {
-      const c = await db.clients.get(id!);
+      const { data: c } = await supabase.from('clients').select('*').eq('id', id!).single();
       if (c) {
-        setClient(c);
-        const d = await db.disbursements.where('client_id').equals(id!).toArray();
-        setDisbursements(d.sort((a, b) => b.created_at.localeCompare(a.created_at)));
-        const p = await db.payments.where('client_id').equals(id!).toArray();
-        setPayments(p.sort((a, b) => b.created_at.localeCompare(a.created_at)));
+        setClient(c as Client);
+        const { data: d } = await supabase.from('disbursements').select('*').eq('client_id', id!).order('created_at', { ascending: false });
+        setDisbursements((d ?? []) as Disbursement[]);
+        const { data: p } = await supabase.from('payments').select('*').eq('client_id', id!).order('created_at', { ascending: false });
+        setPayments((p ?? []) as Payment[]);
       }
       setLoading(false);
     }
@@ -385,11 +386,7 @@ export default function ClientDetail() {
                 <p className="text-lg font-bold text-green-600">{formatPeso(signatureModal.amount)}</p>
               </div>
               <div className="border border-gray-200 rounded-xl p-2 bg-gray-50">
-                <img
-                  src={signatureModal.image}
-                  alt="Client signature"
-                  className="w-full h-auto"
-                />
+                <SignatureImage signatureImage={signatureModal.image} />
               </div>
             </div>
           </div>

@@ -1,29 +1,34 @@
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db/database';
+import { useState, useEffect, useCallback } from 'react';
+import { supabase } from '../lib/supabase';
 import type { CapitalPurchase } from '../types';
 import { v4 as uuid } from 'uuid';
 
 export function useCapital() {
-  const capitals = useLiveQuery(
-    () => db.capital_purchases.orderBy('created_at').reverse().toArray(),
-    []
-  );
+  const [capitals, setCapitals] = useState<CapitalPurchase[]>([]);
+  const [smartBalance, setSmartBalance] = useState(0);
+  const [globeBalance, setGlobeBalance] = useState(0);
 
-  const smartBalance = useLiveQuery(
-    () => db.capital_purchases
-      .where('network').equals('smart')
-      .toArray()
-      .then(items => items.reduce((sum, c) => sum + c.remaining_balance, 0)),
-    []
-  );
+  const fetchCapitals = useCallback(async () => {
+    const { data } = await supabase
+      .from('capital_purchases')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (data) {
+      const items = data as CapitalPurchase[];
+      setCapitals(items);
+      setSmartBalance(items.filter(c => c.network === 'smart').reduce((s, c) => s + c.remaining_balance, 0));
+      setGlobeBalance(items.filter(c => c.network === 'globe').reduce((s, c) => s + c.remaining_balance, 0));
+    }
+  }, []);
 
-  const globeBalance = useLiveQuery(
-    () => db.capital_purchases
-      .where('network').equals('globe')
-      .toArray()
-      .then(items => items.reduce((sum, c) => sum + c.remaining_balance, 0)),
-    []
-  );
+  useEffect(() => {
+    fetchCapitals();
+    const channel = supabase
+      .channel('capital_purchases')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'capital_purchases' }, fetchCapitals)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [fetchCapitals]);
 
   async function addCapital(data: {
     network: 'smart' | 'globe';
@@ -44,48 +49,70 @@ export function useCapital() {
       notes: data.notes,
       created_at: now,
     };
-    await db.capital_purchases.add(capital);
+    await supabase.from('capital_purchases').insert(capital);
+    await fetchCapitals();
     return capital;
   }
 
   async function getOldestAvailableBatch(network: 'smart' | 'globe') {
-    const batches = await db.capital_purchases
-      .where('network').equals(network)
-      .toArray();
-    return batches
-      .filter(b => b.remaining_balance > 0)
-      .sort((a, b) => a.created_at.localeCompare(b.created_at))[0] ?? null;
+    const { data } = await supabase
+      .from('capital_purchases')
+      .select('*')
+      .eq('network', network)
+      .gt('remaining_balance', 0)
+      .order('created_at', { ascending: true })
+      .limit(1);
+    return (data?.[0] as CapitalPurchase) ?? null;
   }
 
   async function deductFromBatch(batchId: string, amount: number) {
-    await db.capital_purchases.where('id').equals(batchId).modify(batch => {
-      batch.remaining_balance = Math.max(0, batch.remaining_balance - amount);
-    });
+    const { data } = await supabase
+      .from('capital_purchases')
+      .select('remaining_balance')
+      .eq('id', batchId)
+      .single();
+    if (data) {
+      await supabase
+        .from('capital_purchases')
+        .update({ remaining_balance: Math.max(0, data.remaining_balance - amount) })
+        .eq('id', batchId);
+    }
   }
 
   async function restoreToBatch(batchId: string, amount: number) {
-    await db.capital_purchases.where('id').equals(batchId).modify(batch => {
-      batch.remaining_balance += amount;
-    });
+    const { data } = await supabase
+      .from('capital_purchases')
+      .select('remaining_balance')
+      .eq('id', batchId)
+      .single();
+    if (data) {
+      await supabase
+        .from('capital_purchases')
+        .update({ remaining_balance: data.remaining_balance + amount })
+        .eq('id', batchId);
+    }
   }
 
-  /** Returns true if capital has linked disbursements */
   async function hasLinkedDisbursements(id: string): Promise<boolean> {
-    const count = await db.disbursements.where('capital_purchase_id').equals(id).count();
-    return count > 0;
+    const { count } = await supabase
+      .from('disbursements')
+      .select('id', { count: 'exact', head: true })
+      .eq('capital_purchase_id', id);
+    return (count ?? 0) > 0;
   }
 
   async function deleteCapital(id: string) {
     if (await hasLinkedDisbursements(id)) {
       throw new Error('Cannot delete capital with linked disbursements. Delete the disbursements first.');
     }
-    await db.capital_purchases.delete(id);
+    await supabase.from('capital_purchases').delete().eq('id', id);
+    await fetchCapitals();
   }
 
   return {
-    capitals: capitals ?? [],
-    smartBalance: smartBalance ?? 0,
-    globeBalance: globeBalance ?? 0,
+    capitals,
+    smartBalance,
+    globeBalance,
     addCapital,
     getOldestAvailableBatch,
     deductFromBatch,

@@ -1,13 +1,27 @@
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db/database';
+import { useState, useEffect, useCallback } from 'react';
+import { supabase } from '../lib/supabase';
 import type { Client } from '../types';
 import { v4 as uuid } from 'uuid';
 
 export function useClients() {
-  const clients = useLiveQuery(
-    () => db.clients.orderBy('name').toArray(),
-    []
-  );
+  const [clients, setClients] = useState<Client[]>([]);
+
+  const fetchClients = useCallback(async () => {
+    const { data } = await supabase
+      .from('clients')
+      .select('*')
+      .order('name');
+    if (data) setClients(data as Client[]);
+  }, []);
+
+  useEffect(() => {
+    fetchClients();
+    const channel = supabase
+      .channel('clients')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, fetchClients)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [fetchClients]);
 
   async function addClient(data: {
     name: string;
@@ -30,42 +44,54 @@ export function useClients() {
       created_at: now,
       updated_at: now,
     };
-    await db.clients.add(client);
+    await supabase.from('clients').insert(client);
+    await fetchClients();
     return client;
   }
 
   async function updateClient(id: string, data: Partial<Client>) {
-    await db.clients.update(id, { ...data, updated_at: new Date().toISOString() });
+    await supabase
+      .from('clients')
+      .update({ ...data, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    await fetchClients();
   }
 
-  /** Cascade delete: removes client + all their disbursements, payments, and collection items */
   async function deleteClient(id: string) {
-    await db.transaction('rw', [db.clients, db.disbursements, db.payments, db.collection_list], async () => {
-      // Restore capital for successful disbursements before deleting
-      const disbursements = await db.disbursements.where('client_id').equals(id).toArray();
+    const { data: disbursements } = await supabase
+      .from('disbursements')
+      .select('id, capital_purchase_id, face_value, status')
+      .eq('client_id', id);
+
+    if (disbursements) {
       for (const d of disbursements) {
         if (d.status === 'success') {
-          await db.capital_purchases.where('id').equals(d.capital_purchase_id).modify(batch => {
-            batch.remaining_balance += d.face_value;
-          });
+          const { data: batch } = await supabase
+            .from('capital_purchases')
+            .select('remaining_balance')
+            .eq('id', d.capital_purchase_id)
+            .single();
+          if (batch) {
+            await supabase
+              .from('capital_purchases')
+              .update({ remaining_balance: batch.remaining_balance + d.face_value })
+              .eq('id', d.capital_purchase_id);
+          }
         }
       }
-      await db.disbursements.where('client_id').equals(id).delete();
-      await db.payments.where('client_id').equals(id).delete();
-      await db.collection_list.where('client_id').equals(id).delete();
-      await db.clients.delete(id);
-    });
+    }
+
+    await supabase.from('disbursements').delete().eq('client_id', id);
+    await supabase.from('payments').delete().eq('client_id', id);
+    await supabase.from('collection_list').delete().eq('client_id', id);
+    await supabase.from('clients').delete().eq('id', id);
+    await fetchClients();
   }
 
-  async function getClient(id: string) {
-    return db.clients.get(id);
+  async function getClient(id: string): Promise<Client | undefined> {
+    const { data } = await supabase.from('clients').select('*').eq('id', id).single();
+    return data as Client ?? undefined;
   }
 
-  return {
-    clients: clients ?? [],
-    addClient,
-    updateClient,
-    deleteClient,
-    getClient,
-  };
+  return { clients, addClient, updateClient, deleteClient, getClient };
 }

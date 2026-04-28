@@ -1,5 +1,49 @@
 @import "tailwindcss";
 
+/* ── Dark mode color overrides ── */
+/* Tailwind v4 uses CSS custom properties for all colors.
+   Remapping the gray scale + white under .dark gives us
+   full dark mode without adding dark: to every component. */
+.dark {
+  color-scheme: dark;
+
+  /* Gray scale — inverted for dark surfaces/text */
+  --color-gray-50:  #0f172a;
+  --color-gray-100: #1e293b;
+  --color-gray-200: #334155;
+  --color-gray-300: #475569;
+  --color-gray-400: #64748b;
+  --color-gray-500: #94a3b8;
+  --color-gray-600: #cbd5e1;
+  --color-gray-700: #e2e8f0;
+  --color-gray-800: #f1f5f9;
+  --color-gray-900: #f8fafc;
+
+  /* White → dark surface for cards, nav, modals */
+  --color-white: #1e293b;
+
+  /* Accent -50 tints (used for subtle active/hover backgrounds) */
+  --color-blue-50:   #1e3a5f;
+  --color-red-50:    #4c1d1d;
+  --color-green-50:  #0f2d1a;
+  --color-amber-50:  #451a03;
+  --color-purple-50: #2e1065;
+}
+
+/* Preserve actual white for text/icons on colored backgrounds and toggle knobs */
+.dark .text-white { color: #fff !important; }
+.dark .border-white { border-color: #fff !important; }
+.dark .shadow { --tw-shadow-color: rgba(0,0,0,0.3); }
+.dark .shadow-sm { --tw-shadow-color: rgba(0,0,0,0.3); }
+
+/* Toggle switch knobs — small white circles inside colored tracks */
+.dark button > span.rounded-full.bg-white {
+  background-color: #fff !important;
+}
+
+/* Input placeholder text in dark mode */
+.dark input::placeholder { color: #64748b; }
+
 /* Keep Leaflet map below sidebar/overlay z-index */
 .leaflet-container {
   z-index: 0 !important;

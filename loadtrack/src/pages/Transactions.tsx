@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { format, startOfMonth, endOfMonth, parseISO } from 'date-fns';
 import { ChevronLeft, ChevronRight, ShoppingCart, SendHorizonal, Wallet } from 'lucide-react';
-import { db } from '../db/database';
+import { useCapital } from '../hooks/useCapital';
+import { useDisbursements } from '../hooks/useDisbursements';
+import { usePayments } from '../hooks/usePayments';
+import { useClients } from '../hooks/useClients';
 import { formatPeso } from '../utils/currency';
 import PageHeader from '../components/layout/PageHeader';
 import NetworkBadge from '../components/shared/NetworkBadge';
@@ -48,21 +50,20 @@ export default function Transactions() {
   const mStart = format(startOfMonth(monthDate), 'yyyy-MM-dd');
   const mEnd = format(endOfMonth(monthDate), 'yyyy-MM-dd');
 
-  const capitals = useLiveQuery(() => db.capital_purchases.toArray(), []);
-  const disbursements = useLiveQuery(() => db.disbursements.toArray(), []);
-  const payments = useLiveQuery(() => db.payments.toArray(), []);
-  const clientsMap = useLiveQuery(
-    () => db.clients.toArray().then(cs => {
-      const m: Record<string, Client> = {};
-      cs.forEach(c => { m[c.id] = c; });
-      return m;
-    }), []
-  );
+  const { capitals } = useCapital();
+  const { disbursements } = useDisbursements();
+  const { payments } = usePayments();
+  const { clients } = useClients();
+  const clientsMap = useMemo(() => {
+    const m: Record<string, Client> = {};
+    clients.forEach(c => { m[c.id] = c; });
+    return m;
+  }, [clients]);
 
   // LOAD tab rows
   const loadRows = useMemo<LoadRow[]>(() => {
     const result: LoadRow[] = [];
-    for (const c of capitals ?? []) {
+    for (const c of capitals) {
       if (c.date < mStart || c.date > mEnd) continue;
       result.push({
         id: c.id, type: 'buy', date: c.date, network: c.network, amount: c.face_value,
@@ -70,7 +71,7 @@ export default function Transactions() {
         remaining_balance: c.remaining_balance,
       });
     }
-    for (const d of disbursements ?? []) {
+    for (const d of disbursements) {
       if (d.date < mStart || d.date > mEnd) continue;
       result.push({
         id: d.id, type: 'disburse', date: d.date, network: d.network, amount: d.selling_price,
@@ -84,7 +85,7 @@ export default function Transactions() {
 
   // PAYMENTS tab rows
   const paymentRows = useMemo<PaymentRow[]>(() => {
-    return (payments ?? [])
+    return (payments)
       .filter(p => p.date >= mStart && p.date <= mEnd)
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
   }, [payments, mStart, mEnd]);

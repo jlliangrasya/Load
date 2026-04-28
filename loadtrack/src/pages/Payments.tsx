@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Wallet, Search, ChevronDown, ChevronUp, Check } from 'lucide-react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db/database';
+import { useClients } from '../hooks/useClients';
 import { usePayments } from '../hooks/usePayments';
+import { supabase } from '../lib/supabase';
+import { useSignatureUpload } from '../hooks/useSignatureUpload';
 import { formatPeso } from '../utils/currency';
 import type { Disbursement } from '../types';
 import PageHeader from '../components/layout/PageHeader';
@@ -17,8 +18,9 @@ export default function Payments() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { addPayment } = usePayments();
+  const { processSignature, canSave } = useSignatureUpload();
 
-  const clients = useLiveQuery(() => db.clients.orderBy('name').toArray(), []);
+  const { clients } = useClients();
 
   const [clientId, setClientId] = useState(searchParams.get('client') ?? '');
   const [clientSearch, setClientSearch] = useState('');
@@ -29,14 +31,15 @@ export default function Payments() {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [notes, setNotes] = useState('');
   const [showSignature, setShowSignature] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [selectedDisbursementIds, setSelectedDisbursementIds] = useState<string[]>([]);
   const [clientDisbursements, setClientDisbursements] = useState<Disbursement[]>([]);
   const [showDisbursements, setShowDisbursements] = useState(false);
 
-  const selectedClient = clients?.find(c => c.id === clientId);
-  const filteredClients = clients?.filter(c =>
+  const selectedClient = clients.find(c => c.id === clientId);
+  const filteredClients = clients.filter(c =>
     c.name.toLowerCase().includes(clientSearch.toLowerCase())
-  ) ?? [];
+  );
 
   // Load unpaid disbursements when client changes
   useEffect(() => {
@@ -46,10 +49,8 @@ export default function Payments() {
       setShowDisbursements(false);
       return;
     }
-    db.disbursements.where('client_id').equals(clientId).toArray().then(disbs => {
-      setClientDisbursements(
-        disbs.filter(d => d.status === 'success').sort((a, b) => b.created_at.localeCompare(a.created_at))
-      );
+    supabase.from('disbursements').select('*').eq('client_id', clientId).eq('status', 'success').order('created_at', { ascending: false }).then(({ data }) => {
+      setClientDisbursements(data ?? []);
     });
     setSelectedDisbursementIds([]);
   }, [clientId]);
@@ -71,6 +72,10 @@ export default function Payments() {
   };
 
   const handleProceedToSignature = () => {
+    if (!canSave) {
+      toast.error('Connect Google Drive first in Settings to save signatures.');
+      return;
+    }
     if (!clientId) { toast.error('Please select a client'); return; }
     const amt = parseFloat(amount);
     if (!amt || amt <= 0) { toast.error('Please enter a valid amount'); return; }
@@ -86,35 +91,55 @@ export default function Payments() {
   };
 
   const handleSignatureConfirm = async (signatureDataUrl: string) => {
+    setSaving(true);
     try {
       const amt = parseFloat(amount);
+      const signatureRef = await processSignature(signatureDataUrl, selectedClient?.name ?? 'unknown', 'payment');
       await addPayment({
         client_id: clientId,
         date,
         amount: amt,
         method,
         reference_number: (method !== 'cash' && referenceNumber.trim()) ? referenceNumber.trim() : undefined,
-        signature_image: signatureDataUrl,
+        signature_image: signatureRef,
         disbursement_ids: selectedDisbursementIds.length > 0 ? selectedDisbursementIds : undefined,
         notes: notes.trim() || undefined,
       });
-      toast.success('Payment recorded!');
+      toast.success('Payment saved! Signature backed up to Drive.');
       setShowSignature(false);
       navigate('/');
-    } catch {
-      toast.error('Failed to save payment. Please try again.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg === 'NOT_CONNECTED') {
+        toast.error('Connect Google Drive first in Settings.');
+      } else if (msg === 'OFFLINE') {
+        toast.error('No internet connection. Please try again when online.');
+      } else {
+        toast.error('Failed to save payment. Please try again.');
+      }
       setShowSignature(false);
+    } finally {
+      setSaving(false);
     }
   };
 
   if (showSignature) {
     return (
-      <SignaturePad
-        onConfirm={handleSignatureConfirm}
-        onCancel={() => setShowSignature(false)}
-        clientName={selectedClient?.name}
-        amount={amount ? formatPeso(parseFloat(amount)) : undefined}
-      />
+      <>
+        <SignaturePad
+          onConfirm={handleSignatureConfirm}
+          onCancel={() => setShowSignature(false)}
+          clientName={selectedClient?.name}
+          amount={amount ? formatPeso(parseFloat(amount)) : undefined}
+        />
+        {saving && (
+          <div className="fixed inset-0 z-[100] bg-white/90 flex flex-col items-center justify-center gap-4">
+            <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+            <p className="text-lg font-semibold text-gray-800">Saving payment...</p>
+            <p className="text-sm text-gray-500">Please wait, don't close the app</p>
+          </div>
+        )}
+      </>
     );
   }
 
@@ -123,6 +148,15 @@ export default function Payments() {
       <PageHeader title="Record Payment" />
 
       <div className="p-4 space-y-4">
+        {!canSave && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+            <span className="text-xl leading-none mt-0.5">&#9888;&#65039;</span>
+            <div>
+              <p className="text-sm font-semibold text-amber-800">Google Drive not connected</p>
+              <p className="text-xs text-amber-600 mt-1 leading-relaxed">You need to connect Google Drive before recording payments. Go to <span className="font-semibold">Settings</span> and tap <span className="font-semibold">"Sign in with Google"</span>.</p>
+            </div>
+          </div>
+        )}
         {/* Client Selection */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Client *</label>

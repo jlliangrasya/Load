@@ -63,6 +63,7 @@ export interface AppSettings {
   hide_selling_if_equal: number;
   owner_name: string;
   business_name: string;
+  pin: string;
 }
 
 export interface CollectionItem {

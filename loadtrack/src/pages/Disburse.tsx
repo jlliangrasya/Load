@@ -1,17 +1,19 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { SendHorizonal, Search } from 'lucide-react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { v4 as uuid } from 'uuid';
-import { db } from '../db/database';
+import { supabase } from '../lib/supabase';
+import { getSettingsWithDefaults } from '../db/database';
+import { useClients } from '../hooks/useClients';
+import { useCapital } from '../hooks/useCapital';
 import { useDisbursements } from '../hooks/useDisbursements';
+import type { AppSettings, CapitalPurchase } from '../types';
 import { formatPeso } from '../utils/currency';
 import PageHeader from '../components/layout/PageHeader';
 import NetworkBadge from '../components/shared/NetworkBadge';
 import SignaturePad from '../components/signature/SignaturePad';
 import toast from 'react-hot-toast';
 import QuickAmounts from '../components/shared/QuickAmounts';
-import RecentClients from '../components/shared/RecentClients';
 
 type PaymentStatus = 'not_yet' | 'paid';
 type PayMethod = 'cash' | 'gcash' | 'online_transfer';
@@ -21,16 +23,20 @@ export default function Disburse() {
   const navigate = useNavigate();
   const { addDisbursement } = useDisbursements();
 
-  const clients = useLiveQuery(() => db.clients.orderBy('name').toArray(), []);
-  const settings = useLiveQuery(() => db.app_settings.get(1), []);
+  const { clients } = useClients();
+  const { getOldestAvailableBatch } = useCapital();
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [availableBatch, setAvailableBatch] = useState<CapitalPurchase | null>(null);
 
   const [clientId, setClientId] = useState(searchParams.get('client') ?? '');
   const [clientSearch, setClientSearch] = useState('');
   const [showClientDropdown, setShowClientDropdown] = useState(false);
   const [network, setNetwork] = useState<'smart' | 'globe'>('smart');
   const [faceValue, setFaceValue] = useState('');
-  const [sellingPrice, setSellingPrice] = useState('');
-  const [manualSellingPrice, setManualSellingPrice] = useState(false);
+  const [manualSellingPrice, setManualSellingPrice] = useState('');
+
+  useEffect(() => { getSettingsWithDefaults().then(s => setSettings(s as AppSettings)); }, []);
+  useEffect(() => { getOldestAvailableBatch(network).then(setAvailableBatch); }, [network, getOldestAvailableBatch]);
   const [status, setStatus] = useState<'success' | 'failed' | 'returned'>('success');
   const [failureReason, setFailureReason] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -42,41 +48,25 @@ export default function Disburse() {
   const [referenceNumber, setReferenceNumber] = useState('');
   const [showSignature, setShowSignature] = useState(false);
 
-  const availableBatch = useLiveQuery(
-    () => db.capital_purchases
-      .where('network').equals(network)
-      .toArray()
-      .then(batches => batches
-        .filter(b => b.remaining_balance > 0)
-        .sort((a, b) => a.created_at.localeCompare(b.created_at))[0] ?? null
-      ),
-    [network]
-  );
+  // Derive selling price: manual override takes priority, otherwise auto-markup
+  const fvNum = parseFloat(faceValue) || 0;
+  const autoEnabled = settings?.auto_markup_enabled !== 0;
+  const defaultMarkup = network === 'smart'
+    ? (settings?.default_smart_markup ?? 0)
+    : (settings?.default_globe_markup ?? 0);
+  const sellingPrice = manualSellingPrice !== ''
+    ? manualSellingPrice
+    : fvNum > 0
+      ? String(autoEnabled ? fvNum + defaultMarkup : fvNum)
+      : '';
 
-  // Auto-fill selling price from face value + markup (only if user hasn't manually edited)
-  useEffect(() => {
-    if (manualSellingPrice) return;
-    const fv = parseFloat(faceValue) || 0;
-    if (fv > 0) {
-      const autoEnabled = settings?.auto_markup_enabled !== 0;
-      if (autoEnabled) {
-        const defaultMarkup = network === 'smart'
-          ? (settings?.default_smart_markup ?? 2)
-          : (settings?.default_globe_markup ?? 2);
-        setSellingPrice(String(fv + defaultMarkup));
-      } else {
-        setSellingPrice(String(fv));
-      }
-    }
-  }, [faceValue, network, settings, manualSellingPrice]);
-
-  const markup = (parseFloat(sellingPrice) || 0) - (parseFloat(faceValue) || 0);
-  const hideSellingPrice = settings?.hide_selling_if_equal === 1 && faceValue && sellingPrice && faceValue === sellingPrice;
-  const selectedClient = clients?.find(c => c.id === clientId);
-
-  const filteredClients = clients?.filter(c =>
+  const spNum = parseFloat(sellingPrice) || 0;
+  const markup = spNum - fvNum;
+  const hideSellingPrice = settings?.hide_selling_if_equal === 1 && fvNum > 0 && Math.abs(markup) < 0.01;
+  const selectedClient = clients.find(c => c.id === clientId);
+  const filteredClients = clients.filter(c =>
     c.name.toLowerCase().includes(clientSearch.toLowerCase())
-  ) ?? [];
+  );
 
   // Validate before submit/signature
   function validate(): boolean {
@@ -126,26 +116,28 @@ export default function Disburse() {
       notes: notes.trim() || undefined,
     });
 
-    // If paid at time of disbursement, create payment in a transaction
+    // If paid at time of disbursement, create payment record
     if (status === 'success' && paymentStatus === 'paid') {
       const now = new Date().toISOString();
-      await db.transaction('rw', [db.payments, db.clients], async () => {
-        await db.payments.add({
-          id: uuid(),
-          client_id: clientId,
-          date,
-          amount: sp,
-          method: payMethod,
-          reference_number: (payMethod !== 'cash' && referenceNumber.trim()) ? referenceNumber.trim() : undefined,
-          signature_image: signatureImage ?? '',
-          created_at: now,
-        });
-        await db.clients.where('id').equals(clientId).modify(c => {
-          c.total_paid += sp;
-          c.outstanding_balance = c.total_load_received - c.total_paid;
-          c.updated_at = now;
-        });
+      await supabase.from('payments').insert({
+        id: uuid(),
+        client_id: clientId,
+        date,
+        amount: sp,
+        method: payMethod,
+        reference_number: (payMethod !== 'cash' && referenceNumber.trim()) ? referenceNumber.trim() : null,
+        signature_image: signatureImage ?? '',
+        created_at: now,
       });
+      // recalculate is handled inside addDisbursement already; just refresh balance
+      const { data: client } = await supabase.from('clients').select('total_load_received, total_paid').eq('id', clientId).single();
+      if (client) {
+        await supabase.from('clients').update({
+          total_paid: client.total_paid + sp,
+          outstanding_balance: client.total_load_received - (client.total_paid + sp),
+          updated_at: now,
+        }).eq('id', clientId);
+      }
     }
 
     const paidLabel = paymentStatus === 'paid' ? ' (Paid)' : '';
@@ -209,9 +201,7 @@ export default function Disburse() {
             </div>
           ) : (
             <>
-            {!selectedClient && !clientSearch && (
-              <RecentClients onSelect={(id) => { setClientId(id); setShowClientDropdown(false); }} />
-            )}
+            
             <div className="relative">
               <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
@@ -294,7 +284,7 @@ export default function Disburse() {
           />
           <QuickAmounts
             amounts={[100, 200, 300, 500, 1000, 1500, 2000, 3000, 5000]}
-            onSelect={(a) => { setFaceValue(String(a)); setManualSellingPrice(false); }}
+            onSelect={(a) => { setFaceValue(String(a)); setManualSellingPrice(''); }}
             selected={parseFloat(faceValue) || undefined}
           />
         </div>
@@ -307,7 +297,7 @@ export default function Disburse() {
               type="number"
               inputMode="decimal"
               value={sellingPrice}
-              onChange={e => { setSellingPrice(e.target.value); setManualSellingPrice(true); }}
+              onChange={e => setManualSellingPrice(e.target.value)}
               placeholder="What client pays"
               className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />

@@ -1,75 +1,55 @@
-import { useLiveQuery } from 'dexie-react-hooks';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Users, AlertCircle, TrendingUp, SendHorizonal, Wallet } from 'lucide-react';
-import { db } from '../db/database';
+import { supabase } from '../lib/supabase';
 import { formatPeso } from '../utils/currency';
 import PageHeader from '../components/layout/PageHeader';
 import StatCard from '../components/shared/StatCard';
 import NetworkBadge from '../components/shared/NetworkBadge';
 import StatusBadge from '../components/shared/StatusBadge';
 import PaymentMethodBadge from '../components/shared/PaymentMethodBadge';
-import type { Client } from '../types';
+import type { Client, Disbursement, Payment, CapitalPurchase } from '../types';
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const today = new Date().toISOString().split('T')[0];
+  const [capitals, setCapitals] = useState<CapitalPurchase[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [recentDisbursements, setRecentDisbursements] = useState<Disbursement[]>([]);
+  const [recentPayments, setRecentPayments] = useState<Payment[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const smartBalance = useLiveQuery(
-    () => db.capital_purchases.where('network').equals('smart').toArray()
-      .then(items => items.reduce((s, c) => s + c.remaining_balance, 0)),
-    []
-  );
+  const fetchData = useCallback(async () => {
+    const [{ data: caps }, { data: cls }, { data: disbs }, { data: pays }] = await Promise.all([
+      supabase.from('capital_purchases').select('*'),
+      supabase.from('clients').select('*'),
+      supabase.from('disbursements').select('*').order('created_at', { ascending: false }).limit(5),
+      supabase.from('payments').select('*').order('created_at', { ascending: false }).limit(5),
+    ]);
+    setCapitals((caps ?? []) as CapitalPurchase[]);
+    setClients((cls ?? []) as Client[]);
+    setRecentDisbursements((disbs ?? []) as Disbursement[]);
+    setRecentPayments((pays ?? []) as Payment[]);
+    setIsLoading(false);
+  }, []);
 
-  const globeBalance = useLiveQuery(
-    () => db.capital_purchases.where('network').equals('globe').toArray()
-      .then(items => items.reduce((s, c) => s + c.remaining_balance, 0)),
-    []
-  );
+  useEffect(() => {
+    fetchData();
+    const channels = [
+      supabase.channel('dash-capital').on('postgres_changes', { event: '*', schema: 'public', table: 'capital_purchases' }, fetchData).subscribe(),
+      supabase.channel('dash-clients').on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, fetchData).subscribe(),
+      supabase.channel('dash-disbs').on('postgres_changes', { event: '*', schema: 'public', table: 'disbursements' }, fetchData).subscribe(),
+      supabase.channel('dash-pays').on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, fetchData).subscribe(),
+    ];
+    return () => { channels.forEach(c => supabase.removeChannel(c)); };
+  }, [fetchData]);
 
-  const totalOutstanding = useLiveQuery(
-    () => db.clients.toArray().then(cs => cs.reduce((s, c) => s + c.outstanding_balance, 0)),
-    []
-  );
+  const smartBalance = capitals.filter(c => c.network === 'smart').reduce((s, c) => s + c.remaining_balance, 0);
+  const globeBalance = capitals.filter(c => c.network === 'globe').reduce((s, c) => s + c.remaining_balance, 0);
+  const totalOutstanding = clients.reduce((s, c) => s + c.outstanding_balance, 0);
+  const unpaidClients = clients.filter(c => c.outstanding_balance > 0).length;
 
-  const unpaidClients = useLiveQuery(
-    () => db.clients.filter(c => c.outstanding_balance > 0).count(),
-    []
-  );
-
-  const collectedToday = useLiveQuery(
-    () => db.payments.where('date').equals(today).toArray()
-      .then(ps => ps.reduce((s, p) => s + p.amount, 0)),
-    []
-  );
-
-  const disbursedToday = useLiveQuery(
-    () => db.disbursements.where('date').equals(today).toArray()
-      .then(ds => ds.filter(d => d.status === 'success').reduce((s, d) => s + d.selling_price, 0)),
-    []
-  );
-
-  const recentDisbursements = useLiveQuery(
-    () => db.disbursements.orderBy('created_at').reverse().limit(5).toArray(),
-    []
-  );
-
-  const recentPayments = useLiveQuery(
-    () => db.payments.orderBy('created_at').reverse().limit(5).toArray(),
-    []
-  );
-
-  const clients = useLiveQuery(() => db.clients.toArray(), []);
-
-  const clientsMap = useLiveQuery(
-    () => db.clients.toArray().then(cs => {
-      const map: Record<string, Client> = {};
-      cs.forEach(c => { map[c.id] = c; });
-      return map;
-    }),
-    []
-  );
-
-  const isLoading = smartBalance === undefined;
+  const clientsMap: Record<string, Client> = {};
+  clients.forEach(c => { clientsMap[c.id] = c; });
 
   if (isLoading) {
     return (
@@ -93,35 +73,25 @@ export default function Dashboard() {
         <div className="grid grid-cols-2 gap-3">
           <StatCard
             label="Smart Balance"
-            value={formatPeso(smartBalance ?? 0)}
+            value={formatPeso(smartBalance)}
             color="text-blue-600"
             icon={<TrendingUp size={16} />}
           />
           <StatCard
             label="Globe Balance"
-            value={formatPeso(globeBalance ?? 0)}
+            value={formatPeso(globeBalance)}
             color="text-red-600"
             icon={<TrendingUp size={16} />}
           />
           <StatCard
             label="Total Outstanding"
-            value={formatPeso(totalOutstanding ?? 0)}
+            value={formatPeso(totalOutstanding)}
             color="text-red-600"
             icon={<AlertCircle size={16} />}
           />
           <StatCard
-            label="Collected Today"
-            value={formatPeso(collectedToday ?? 0)}
-            color="text-green-600"
-          />
-          <StatCard
-            label="Disbursed Today"
-            value={formatPeso(disbursedToday ?? 0)}
-            color="text-blue-600"
-          />
-          <StatCard
             label="Unpaid Clients"
-            value={String(unpaidClients ?? 0)}
+            value={String(unpaidClients)}
             color="text-red-600"
             icon={<Users size={16} />}
             onClick={() => navigate('/unpaid')}
@@ -151,7 +121,7 @@ export default function Dashboard() {
         </div>
 
         {/* Quick Client Access */}
-        {clients && clients.length > 0 && (
+        {clients.length > 0 && (
           <div>
             <h2 className="text-sm font-semibold text-gray-700 mb-2">Quick Disburse</h2>
             <div className="flex gap-2 overflow-x-auto pb-1">
@@ -177,14 +147,14 @@ export default function Dashboard() {
         {/* Recent Disbursements */}
         <div>
           <h2 className="text-sm font-semibold text-gray-700 mb-2">Recent Disbursements</h2>
-          {recentDisbursements && recentDisbursements.length > 0 ? (
+          {recentDisbursements.length > 0 ? (
             <>
               <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
-                {recentDisbursements.slice(0, 5).map(d => (
+                {recentDisbursements.map(d => (
                   <div key={d.id} className="px-4 py-3 flex items-center justify-between">
                     <div>
                       <p className="text-sm font-medium text-gray-900">
-                        {clientsMap?.[d.client_id]?.name ?? 'Unknown'}
+                        {clientsMap[d.client_id]?.name ?? 'Unknown'}
                       </p>
                       <div className="flex items-center gap-2 mt-1">
                         <NetworkBadge network={d.network} />
@@ -198,14 +168,6 @@ export default function Dashboard() {
                   </div>
                 ))}
               </div>
-              {recentDisbursements.length > 5 && (
-                <button
-                  onClick={() => navigate('/transactions')}
-                  className="w-full text-center py-2 text-xs text-blue-600 font-medium"
-                >
-                  View all {recentDisbursements.length} disbursements →
-                </button>
-              )}
             </>
           ) : (
             <p className="text-sm text-gray-400 text-center py-4">No disbursements yet</p>
@@ -215,14 +177,14 @@ export default function Dashboard() {
         {/* Recent Payments */}
         <div>
           <h2 className="text-sm font-semibold text-gray-700 mb-2">Recent Payments</h2>
-          {recentPayments && recentPayments.length > 0 ? (
+          {recentPayments.length > 0 ? (
             <>
               <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
-                {recentPayments.slice(0, 5).map(p => (
+                {recentPayments.map(p => (
                   <div key={p.id} className="px-4 py-3 flex items-center justify-between">
                     <div>
                       <p className="text-sm font-medium text-gray-900">
-                        {clientsMap?.[p.client_id]?.name ?? 'Unknown'}
+                        {clientsMap[p.client_id]?.name ?? 'Unknown'}
                       </p>
                       <PaymentMethodBadge method={p.method} />
                     </div>
@@ -233,14 +195,6 @@ export default function Dashboard() {
                   </div>
                 ))}
               </div>
-              {recentPayments.length > 5 && (
-                <button
-                  onClick={() => navigate('/transactions')}
-                  className="w-full text-center py-2 text-xs text-green-600 font-medium"
-                >
-                  View all {recentPayments.length} payments →
-                </button>
-              )}
             </>
           ) : (
             <p className="text-sm text-gray-400 text-center py-4">No payments yet</p>

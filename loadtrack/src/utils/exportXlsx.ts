@@ -1,10 +1,10 @@
 import * as XLSX from 'xlsx';
-import { db } from '../db/database';
+import { supabase } from '../lib/supabase';
 import type { Disbursement, Payment } from '../types';
 
 async function getClientName(clientId: string): Promise<string> {
-  const c = await db.clients.get(clientId);
-  return c?.name ?? 'Unknown';
+  const { data } = await supabase.from('clients').select('name').eq('id', clientId).single();
+  return data?.name ?? 'Unknown';
 }
 
 export async function exportDisbursementsXlsx(disbursements: Disbursement[]) {
@@ -49,7 +49,8 @@ export async function exportPaymentsXlsx(payments: Payment[]) {
 }
 
 export async function exportClientsXlsx() {
-  const clients = await db.clients.orderBy('name').toArray();
+  const { data: clients } = await supabase.from('clients').select('*').order('name');
+  if (!clients) return;
   const rows = clients.map(c => ({
     Name: c.name,
     'Contact Number': c.contact_number,

@@ -1,8 +1,10 @@
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { Phone, Wallet, AlertCircle, ClipboardList } from 'lucide-react';
 import { v4 as uuid } from 'uuid';
-import { db } from '../db/database';
+import { supabase } from '../lib/supabase';
+import { useClients } from '../hooks/useClients';
+import type { Client } from '../types';
 import { formatPeso } from '../utils/currency';
 import PageHeader from '../components/layout/PageHeader';
 import EmptyState from '../components/shared/EmptyState';
@@ -10,32 +12,31 @@ import toast from 'react-hot-toast';
 
 export default function UnpaidList() {
   const navigate = useNavigate();
+  const { clients } = useClients();
+  const [collectionClientIds, setCollectionClientIds] = useState<Set<string>>(new Set());
 
-  const unpaidClients = useLiveQuery(
-    () => db.clients
-      .filter(c => c.outstanding_balance > 0)
-      .toArray()
-      .then(cs => cs.sort((a, b) => b.outstanding_balance - a.outstanding_balance)),
-    []
-  );
+  useEffect(() => {
+    supabase.from('collection_list').select('client_id').then(({ data }) => {
+      if (data) setCollectionClientIds(new Set(data.map((i: { client_id: string }) => i.client_id)));
+    });
+  }, []);
 
-  // IDs already on the collection list
-  const collectionClientIds = useLiveQuery(
-    () => db.collection_list.toArray().then(items => new Set(items.map(i => i.client_id))),
-    []
-  );
+  const unpaidClients: Client[] = clients
+    .filter(c => c.outstanding_balance > 0)
+    .sort((a, b) => b.outstanding_balance - a.outstanding_balance);
 
-  const totalUnpaid = unpaidClients?.reduce((s, c) => s + c.outstanding_balance, 0) ?? 0;
-  const isLoading = unpaidClients === undefined;
+  const totalUnpaid = unpaidClients.reduce((s, c) => s + c.outstanding_balance, 0);
+  const isLoading = false;
 
   const handleAddToCollect = async (clientId: string, amount: number) => {
-    await db.collection_list.add({
+    await supabase.from('collection_list').insert({
       id: uuid(),
       client_id: clientId,
       amount,
       collected: 0,
       created_at: new Date().toISOString(),
     });
+    setCollectionClientIds(prev => new Set([...prev, clientId]));
     toast.success('Added to collection list');
   };
 
@@ -61,7 +62,7 @@ export default function UnpaidList() {
         <div className="bg-red-50 rounded-xl p-4 text-center">
           <p className="text-xs font-medium text-red-600 uppercase">Total Unpaid</p>
           <p className="text-2xl font-bold text-red-700">{formatPeso(totalUnpaid)}</p>
-          <p className="text-xs text-red-500 mt-1">{unpaidClients?.length ?? 0} client(s)</p>
+          <p className="text-xs text-red-500 mt-1">{unpaidClients.length ?? 0} client(s)</p>
         </div>
 
         {/* Go to Collection List */}

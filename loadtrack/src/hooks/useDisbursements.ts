@@ -1,13 +1,28 @@
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, recalculateClientBalance, touchClientActivity } from '../db/database';
+import { useState, useEffect, useCallback } from 'react';
+import { supabase } from '../lib/supabase';
+import { recalculateClientBalance, touchClientActivity } from '../db/database';
 import type { Disbursement } from '../types';
 import { v4 as uuid } from 'uuid';
 
 export function useDisbursements() {
-  const disbursements = useLiveQuery(
-    () => db.disbursements.orderBy('created_at').reverse().toArray(),
-    []
-  );
+  const [disbursements, setDisbursements] = useState<Disbursement[]>([]);
+
+  const fetchDisbursements = useCallback(async () => {
+    const { data } = await supabase
+      .from('disbursements')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (data) setDisbursements(data as Disbursement[]);
+  }, []);
+
+  useEffect(() => {
+    fetchDisbursements();
+    const channel = supabase
+      .channel('disbursements')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'disbursements' }, fetchDisbursements)
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [fetchDisbursements]);
 
   async function addDisbursement(data: {
     client_id: string;
@@ -36,50 +51,64 @@ export function useDisbursements() {
       created_at: now,
     };
 
-    await db.transaction('rw', [db.disbursements, db.capital_purchases, db.clients], async () => {
-      await db.disbursements.add(disbursement);
-      if (data.status === 'success') {
-        await db.capital_purchases.where('id').equals(data.capital_purchase_id).modify(batch => {
-          batch.remaining_balance = Math.max(0, batch.remaining_balance - data.face_value);
-        });
-        await db.clients.where('id').equals(data.client_id).modify(c => {
-          c.total_load_received += data.selling_price;
-          c.outstanding_balance = c.total_load_received - c.total_paid;
-          c.updated_at = now;
-        });
+    await supabase.from('disbursements').insert(disbursement);
+
+    if (data.status === 'success') {
+      const { data: batch } = await supabase
+        .from('capital_purchases')
+        .select('remaining_balance')
+        .eq('id', data.capital_purchase_id)
+        .single();
+      if (batch) {
+        await supabase
+          .from('capital_purchases')
+          .update({ remaining_balance: Math.max(0, batch.remaining_balance - data.face_value) })
+          .eq('id', data.capital_purchase_id);
       }
-    });
+      await recalculateClientBalance(data.client_id);
+    }
 
     await touchClientActivity(data.client_id);
+    await fetchDisbursements();
     return disbursement;
   }
 
-  /** Delete a disbursement and reverse its effects on capital + client balance */
   async function deleteDisbursement(id: string) {
-    const d = await db.disbursements.get(id);
+    const { data: d } = await supabase
+      .from('disbursements')
+      .select('*')
+      .eq('id', id)
+      .single();
     if (!d) return;
 
-    await db.transaction('rw', [db.disbursements, db.capital_purchases, db.clients], async () => {
-      await db.disbursements.delete(id);
-      if (d.status === 'success') {
-        // Restore capital
-        await db.capital_purchases.where('id').equals(d.capital_purchase_id).modify(batch => {
-          batch.remaining_balance += d.face_value;
-        });
+    await supabase.from('disbursements').delete().eq('id', id);
+
+    if (d.status === 'success') {
+      const { data: batch } = await supabase
+        .from('capital_purchases')
+        .select('remaining_balance')
+        .eq('id', d.capital_purchase_id)
+        .single();
+      if (batch) {
+        await supabase
+          .from('capital_purchases')
+          .update({ remaining_balance: batch.remaining_balance + d.face_value })
+          .eq('id', d.capital_purchase_id);
       }
-      // Always recalculate from source of truth
-      await recalculateClientBalance(d.client_id);
-    });
+    }
+
+    await recalculateClientBalance(d.client_id);
+    await fetchDisbursements();
   }
 
-  async function getDisbursementsByClient(clientId: string) {
-    return db.disbursements.where('client_id').equals(clientId).reverse().sortBy('created_at');
+  async function getDisbursementsByClient(clientId: string): Promise<Disbursement[]> {
+    const { data } = await supabase
+      .from('disbursements')
+      .select('*')
+      .eq('client_id', clientId)
+      .order('created_at', { ascending: false });
+    return (data ?? []) as Disbursement[];
   }
 
-  return {
-    disbursements: disbursements ?? [],
-    addDisbursement,
-    deleteDisbursement,
-    getDisbursementsByClient,
-  };
+  return { disbursements, addDisbursement, deleteDisbursement, getDisbursementsByClient };
 }

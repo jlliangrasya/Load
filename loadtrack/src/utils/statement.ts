@@ -1,4 +1,4 @@
-import { db } from '../db/database';
+import { supabase } from '../lib/supabase';
 import { formatPeso } from './currency';
 import { format, parseISO } from 'date-fns';
 
@@ -6,26 +6,18 @@ import { format, parseISO } from 'date-fns';
  * Generate a shareable plain-text client statement.
  */
 export async function generateClientStatement(clientId: string): Promise<string> {
-  const client = await db.clients.get(clientId);
+  const { data: client } = await supabase.from('clients').select('*').eq('id', clientId).single();
   if (!client) throw new Error(`Client ${clientId} not found`);
 
-  const disbursements = await db.disbursements
-    .where('client_id')
-    .equals(clientId)
-    .sortBy('date');
-
-  const payments = await db.payments
-    .where('client_id')
-    .equals(clientId)
-    .sortBy('date');
-
-  const settings = await db.app_settings.get(1);
+  const { data: disbursements } = await supabase.from('disbursements').select('*').eq('client_id', clientId).order('date');
+  const { data: payments } = await supabase.from('payments').select('*').eq('client_id', clientId).order('date');
+  const { data: settings } = await supabase.from('app_settings').select('business_name').eq('id', 1).single();
   const businessName = settings?.business_name ?? 'LoadTrack';
 
-  const successDisbursements = disbursements.filter(d => d.status === 'success');
+  const successDisbursements = (disbursements ?? []).filter((d: { status: string }) => d.status === 'success');
 
-  const totalReceived = successDisbursements.reduce((sum, d) => sum + d.selling_price, 0);
-  const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
+  const totalReceived = successDisbursements.reduce((sum: number, d: { selling_price: number }) => sum + d.selling_price, 0);
+  const totalPaid = (payments ?? []).reduce((sum: number, p: { amount: number }) => sum + p.amount, 0);
   const balance = totalReceived - totalPaid;
 
   const today = format(new Date(), 'MMMM d, yyyy');
@@ -48,7 +40,7 @@ export async function generateClientStatement(clientId: string): Promise<string>
 
   // Load Received
   lines.push('LOAD RECEIVED:');
-  for (const d of successDisbursements) {
+  for (const d of successDisbursements as { date: string; network: string; selling_price: number }[]) {
     const dateStr = format(parseISO(d.date), 'MMM d');
     const network = d.network.charAt(0).toUpperCase() + d.network.slice(1);
     const amount = formatPeso(d.selling_price);
@@ -60,7 +52,7 @@ export async function generateClientStatement(clientId: string): Promise<string>
 
   // Payments
   lines.push('PAYMENTS:');
-  for (const p of payments) {
+  for (const p of (payments ?? []) as { date: string; method: string; amount: number }[]) {
     const dateStr = format(parseISO(p.date), 'MMM d');
     const method = formatMethod(p.method);
     const amount = formatPeso(p.amount);

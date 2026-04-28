@@ -1,9 +1,8 @@
 import { useState, useMemo } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { Search, Filter, X, FileDown, FileSpreadsheet, Trash2 } from 'lucide-react';
-import { db } from '../db/database';
 import { useDisbursements } from '../hooks/useDisbursements';
 import { usePayments } from '../hooks/usePayments';
+import { useClients } from '../hooks/useClients';
 import { formatPeso } from '../utils/currency';
 import { exportDisbursementsPdf, exportPaymentsPdf, exportPaymentReceipt } from '../utils/exportPdf';
 import { exportDisbursementsXlsx, exportPaymentsXlsx } from '../utils/exportXlsx';
@@ -12,6 +11,7 @@ import NetworkBadge from '../components/shared/NetworkBadge';
 import StatusBadge from '../components/shared/StatusBadge';
 import PaymentMethodBadge from '../components/shared/PaymentMethodBadge';
 import EmptyState from '../components/shared/EmptyState';
+import SignatureImage from '../components/signature/SignatureImage';
 import toast from 'react-hot-toast';
 import type { Client } from '../types';
 
@@ -29,22 +29,17 @@ export default function History() {
   const [signatureModal, setSignatureModal] = useState<{ image: string; date: string; amount: number } | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
-  const { deleteDisbursement } = useDisbursements();
-  const { deletePayment } = usePayments();
+  const { deleteDisbursement, disbursements: allDisbursements } = useDisbursements();
+  const { deletePayment, payments: allPayments } = usePayments();
+  const { clients } = useClients();
 
-  const disbursements = useLiveQuery(
-    () => db.disbursements.orderBy('created_at').reverse().toArray(), []
-  );
-  const payments = useLiveQuery(
-    () => db.payments.orderBy('created_at').reverse().toArray(), []
-  );
-  const clientsMap = useLiveQuery(
-    () => db.clients.toArray().then(cs => {
-      const map: Record<string, Client> = {};
-      cs.forEach(c => { map[c.id] = c; });
-      return map;
-    }), []
-  );
+  const disbursements = allDisbursements;
+  const payments = allPayments;
+  const clientsMap = useMemo(() => {
+    const map: Record<string, Client> = {};
+    clients.forEach(c => { map[c.id] = c; });
+    return map;
+  }, [clients]);
 
   const hasActiveFilters = dateFrom || dateTo || networkFilter || clientSearch || statusFilter || methodFilter;
 
@@ -78,7 +73,7 @@ export default function History() {
   };
 
   const filteredDisbursements = useMemo(() => {
-    if (!disbursements || !clientsMap) return [];
+    if (!disbursements) return [];
     return disbursements.filter(d => {
       if (dateFrom && d.date < dateFrom) return false;
       if (dateTo && d.date > dateTo) return false;
@@ -93,7 +88,7 @@ export default function History() {
   }, [disbursements, clientsMap, dateFrom, dateTo, networkFilter, statusFilter, clientSearch]);
 
   const filteredPayments = useMemo(() => {
-    if (!payments || !clientsMap) return [];
+    if (!payments) return [];
     return payments.filter(p => {
       if (dateFrom && p.date < dateFrom) return false;
       if (dateTo && p.date > dateTo) return false;
@@ -106,7 +101,7 @@ export default function History() {
     });
   }, [payments, clientsMap, dateFrom, dateTo, methodFilter, clientSearch]);
 
-  const isLoading = disbursements === undefined;
+  const isLoading = false;
 
   if (isLoading) {
     return (
@@ -439,7 +434,7 @@ export default function History() {
                 <p className="text-lg font-bold text-green-600">{formatPeso(signatureModal.amount)}</p>
               </div>
               <div className="border border-gray-200 rounded-xl p-2 bg-gray-50">
-                <img src={signatureModal.image} alt="Client signature" className="w-full h-auto" />
+                <SignatureImage signatureImage={signatureModal.image} />
               </div>
             </div>
           </div>

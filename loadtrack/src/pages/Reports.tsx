@@ -1,9 +1,12 @@
 import { useState, useMemo } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO } from 'date-fns';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid } from 'recharts';
 import { ChevronDown, ChevronUp, FileDown, FileSpreadsheet } from 'lucide-react';
-import { db } from '../db/database';
+import { useCapital } from '../hooks/useCapital';
+import { useDisbursements } from '../hooks/useDisbursements';
+import { usePayments } from '../hooks/usePayments';
+import { useExpenses } from '../hooks/useExpenses';
+import { useClients } from '../hooks/useClients';
 import { formatPeso } from '../utils/currency';
 import { calculateProfitSummary } from '../utils/profit';
 import { exportProfitReportPdf } from '../utils/exportPdf';
@@ -21,17 +24,16 @@ export default function Reports() {
   const [monthStr, setMonthStr] = useState(format(new Date(), 'yyyy-MM'));
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
 
-  const capitals = useLiveQuery(() => db.capital_purchases.toArray(), []);
-  const allDisbursements = useLiveQuery(() => db.disbursements.toArray(), []);
-  const allPayments = useLiveQuery(() => db.payments.toArray(), []);
-  const allExpenses = useLiveQuery(() => db.expenses.toArray(), []);
-  const clientsMap = useLiveQuery(
-    () => db.clients.toArray().then(cs => {
-      const m: Record<string, Client> = {};
-      cs.forEach(c => { m[c.id] = c; });
-      return m;
-    }), []
-  );
+  const { capitals } = useCapital();
+  const { disbursements: allDisbursements } = useDisbursements();
+  const { payments: allPayments } = usePayments();
+  const { expenses: allExpenses } = useExpenses();
+  const { clients } = useClients();
+  const clientsMap = useMemo(() => {
+    const m: Record<string, Client> = {};
+    clients.forEach(c => { m[c.id] = c; });
+    return m;
+  }, [clients]);
 
   // Monthly calculations
   const monthStart = startOfMonth(parseISO(`${monthStr}-01`));
@@ -40,22 +42,22 @@ export default function Reports() {
   const monthEndStr = format(monthEnd, 'yyyy-MM-dd');
 
   const monthCapitals = useMemo(
-    () => (capitals ?? []).filter(c => c.date >= monthStartStr && c.date <= monthEndStr),
+    () => (capitals).filter(c => c.date >= monthStartStr && c.date <= monthEndStr),
     [capitals, monthStartStr, monthEndStr]
   );
 
   const monthDisbursements = useMemo(
-    () => (allDisbursements ?? []).filter(d => d.date >= monthStartStr && d.date <= monthEndStr),
+    () => (allDisbursements).filter(d => d.date >= monthStartStr && d.date <= monthEndStr),
     [allDisbursements, monthStartStr, monthEndStr]
   );
 
   const monthPayments = useMemo(
-    () => (allPayments ?? []).filter(p => p.date >= monthStartStr && p.date <= monthEndStr),
+    () => (allPayments).filter(p => p.date >= monthStartStr && p.date <= monthEndStr),
     [allPayments, monthStartStr, monthEndStr]
   );
 
   const monthExpenses = useMemo(
-    () => (allExpenses ?? []).filter(e => e.date >= monthStartStr && e.date <= monthEndStr),
+    () => (allExpenses).filter(e => e.date >= monthStartStr && e.date <= monthEndStr),
     [allExpenses, monthStartStr, monthEndStr]
   );
 
@@ -92,11 +94,11 @@ export default function Reports() {
 
   // Session view data
   const sortedCapitals = useMemo(
-    () => [...(capitals ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    () => [...(capitals)].sort((a, b) => b.created_at.localeCompare(a.created_at)),
     [capitals]
   );
 
-  const isLoading = capitals === undefined;
+  const isLoading = false;
 
   if (isLoading) {
     return (
@@ -216,7 +218,7 @@ export default function Reports() {
             <div className="space-y-3">
               {sortedCapitals.map(cap => {
                 const isExpanded = expandedSession === cap.id;
-                const sessionDisb = (allDisbursements ?? []).filter(d => d.capital_purchase_id === cap.id);
+                const sessionDisb = (allDisbursements).filter(d => d.capital_purchase_id === cap.id);
                 const successDisb = sessionDisb.filter(d => d.status === 'success');
                 const totalSold = successDisb.reduce((s, d) => s + d.selling_price, 0);
                 const totalMarkup = successDisb.reduce((s, d) => s + d.markup, 0);
