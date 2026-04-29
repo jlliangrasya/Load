@@ -3,7 +3,7 @@ import { Plus, Trash2, Package } from 'lucide-react';
 import { useCapital } from '../hooks/useCapital';
 import { getSettingsWithDefaults } from '../db/database';
 import type { AppSettings } from '../types';
-import { formatPeso } from '../utils/currency';
+import { formatPeso, formatDate } from '../utils/currency';
 import PageHeader from '../components/layout/PageHeader';
 import NetworkBadge from '../components/shared/NetworkBadge';
 import EmptyState from '../components/shared/EmptyState';
@@ -43,7 +43,7 @@ export default function Capital() {
     const cp = parseFloat(costPrice);
     if (!fv || fv <= 0) { toast.error('Please enter a valid face value'); return; }
     if (!cp || cp <= 0) { toast.error('Please enter a valid cost price'); return; }
-    if (cp >= fv) { toast.error('Cost price should be less than face value'); return; }
+
 
     await addCapital({ network, face_value: fv, cost_price: cp, date, notes: notes || undefined });
     toast.success('Capital purchase added!');
@@ -219,7 +219,7 @@ export default function Capital() {
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <NetworkBadge network={c.network} />
-                    <span className="text-xs text-gray-500">{c.date}</span>
+                    <span className="text-xs text-gray-500">{formatDate(c.date)}</span>
                   </div>
                   <button
                     onClick={() => setConfirmDelete(c.id)}

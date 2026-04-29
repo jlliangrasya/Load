@@ -7,7 +7,7 @@ import { useDisbursements } from '../hooks/useDisbursements';
 import { usePayments } from '../hooks/usePayments';
 import { useExpenses } from '../hooks/useExpenses';
 import { useClients } from '../hooks/useClients';
-import { formatPeso } from '../utils/currency';
+import { formatPeso, formatDate } from '../utils/currency';
 import { calculateProfitSummary } from '../utils/profit';
 import { exportProfitReportPdf } from '../utils/exportPdf';
 import { exportFullReportXlsx } from '../utils/exportXlsx';
@@ -233,7 +233,7 @@ export default function Reports() {
                       <div className="text-left">
                         <div className="flex items-center gap-2 mb-1">
                           <NetworkBadge network={cap.network} />
-                          <span className="text-xs text-gray-500">{cap.date}</span>
+                          <span className="text-xs text-gray-500">{formatDate(cap.date)}</span>
                         </div>
                         <p className="text-sm font-semibold">
                           {formatPeso(cap.face_value)}
@@ -284,7 +284,7 @@ export default function Reports() {
                                     </p>
                                     <div className="flex items-center gap-1 mt-0.5">
                                       <StatusBadge status={d.status} />
-                                      <span className="text-[10px] text-gray-400">{d.date}</span>
+                                      <span className="text-[10px] text-gray-400">{formatDate(d.date)}</span>
                                     </div>
                                   </div>
                                   <p className="text-xs font-semibold">{formatPeso(d.selling_price)}</p>

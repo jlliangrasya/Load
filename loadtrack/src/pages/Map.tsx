@@ -2,11 +2,12 @@ import { useMemo, useState, useRef, useCallback, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Share2, MapPin, Search, X, Navigation } from 'lucide-react';
+import { MapPin, Search, X, Navigation } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useClients } from '../hooks/useClients';
 import { formatPeso } from '../utils/currency';
 import PageHeader from '../components/layout/PageHeader';
+import PinLocationModal from '../components/shared/PinLocationModal';
 import toast from 'react-hot-toast';
 import type { Client } from '../types';
 
@@ -82,6 +83,7 @@ function FullMapView() {
   const [showResults, setShowResults] = useState(false);
   const [flyTarget, setFlyTarget] = useState<{ id: string; lat: number; lng: number } | null>(null);
   const markerRefs = useRef<Record<string, L.Marker | null>>({});
+  const [pinningClient, setPinningClient] = useState<Client | null>(null);
 
   const pinnedClients = useMemo(
     () => (clients ?? []).filter(c => c.latitude && c.longitude),
@@ -116,42 +118,16 @@ function FullMapView() {
     markerRefs.current[id] = ref;
   }, []);
 
-  const handleShare = () => {
-    const shareData = pinnedClients.map(c => ({
-      n: c.name,
-      a: c.address ?? '',
-      lt: c.latitude,
-      ln: c.longitude,
-      p: c.contact_number,
-    }));
-    const encoded = btoa(JSON.stringify(shareData));
-    const url = `${window.location.origin}/map?data=${encoded}`;
 
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(url);
-      toast.success('Share link copied to clipboard!');
-    } else {
-      toast('Could not copy. URL is ready in the address bar.');
-    }
-  };
-
-  const handlePinLocation = async (client: Client) => {
-    if (!navigator.geolocation) {
-      toast.error('Geolocation not supported');
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        await supabase.from('clients').update({
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-          updated_at: new Date().toISOString(),
-        }).eq('id', client.id);
-        toast.success(`Location pinned for ${client.name}`);
-      },
-      () => toast.error('Could not get location'),
-      { timeout: 15000, enableHighAccuracy: true }
-    );
+  const handlePinConfirm = async (lat: number, lng: number) => {
+    if (!pinningClient) return;
+    await supabase.from('clients').update({
+      latitude: lat,
+      longitude: lng,
+      updated_at: new Date().toISOString(),
+    }).eq('id', pinningClient.id);
+    toast.success(`Location pinned for ${pinningClient.name}`);
+    setPinningClient(null);
   };
 
   const isLoading = clients === undefined;
@@ -215,15 +191,7 @@ function FullMapView() {
           )}
         </div>
 
-        {/* Share Button */}
-        {pinnedClients.length > 0 && (
-          <button
-            onClick={handleShare}
-            className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white py-3 rounded-xl font-semibold text-sm active:bg-blue-700"
-          >
-            <Share2 size={16} /> Share Map with Collector
-          </button>
-        )}
+
 
         {/* Map */}
         <div className="rounded-xl overflow-hidden border border-gray-200" style={{ height: '50vh' }}>
@@ -296,7 +264,7 @@ function FullMapView() {
                     <p className="text-xs text-gray-500">{c.contact_number}</p>
                   </div>
                   <button
-                    onClick={() => handlePinLocation(c)}
+                    onClick={() => setPinningClient(c)}
                     className="flex items-center gap-1 px-3 py-2 rounded-lg bg-blue-50 text-blue-600 text-xs font-medium"
                   >
                     <MapPin size={14} /> Pin Location
@@ -307,6 +275,13 @@ function FullMapView() {
           </div>
         )}
       </div>
+
+      {pinningClient && (
+        <PinLocationModal
+          onConfirm={handlePinConfirm}
+          onClose={() => setPinningClient(null)}
+        />
+      )}
     </div>
   );
 }

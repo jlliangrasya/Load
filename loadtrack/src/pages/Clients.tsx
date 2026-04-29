@@ -5,6 +5,7 @@ import { useClients } from '../hooks/useClients';
 import { formatPeso } from '../utils/currency';
 import PageHeader from '../components/layout/PageHeader';
 import EmptyState from '../components/shared/EmptyState';
+import PinLocationModal from '../components/shared/PinLocationModal';
 import toast from 'react-hot-toast';
 
 type Filter = 'all' | 'with_balance' | 'fully_paid' | 'dormant';
@@ -24,6 +25,7 @@ export default function Clients() {
   const [address, setAddress] = useState('');
   const [lat, setLat] = useState<number | undefined>();
   const [lng, setLng] = useState<number | undefined>();
+  const [showPinModal, setShowPinModal] = useState(false);
 
   const resetForm = () => {
     setName('');
@@ -33,6 +35,7 @@ export default function Clients() {
     setLng(undefined);
     setShowForm(false);
     setEditingId(null);
+    setShowPinModal(false);
   };
 
   const handleEdit = (client: (typeof clients)[0]) => {
@@ -47,16 +50,11 @@ export default function Clients() {
 
   void handleEdit; // available for inline edit triggers
 
-  const handlePinLocation = () => {
-    if (!navigator.geolocation) {
-      toast.error('Geolocation not supported');
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      pos => { setLat(pos.coords.latitude); setLng(pos.coords.longitude); toast.success('Location pinned!'); },
-      () => toast.error('Could not get location'),
-      { timeout: 15000, enableHighAccuracy: true }
-    );
+  const handlePinConfirm = (newLat: number, newLng: number) => {
+    setLat(newLat);
+    setLng(newLng);
+    setShowPinModal(false);
+    toast.success('Location pinned!');
   };
 
   const handleSubmit = async () => {
@@ -191,11 +189,11 @@ export default function Clients() {
             </div>
 
             <button
-              onClick={handlePinLocation}
+              onClick={() => setShowPinModal(true)}
               className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-gray-300 text-gray-700 text-sm font-medium"
             >
               <MapPin size={16} />
-              {lat ? `Pinned: ${lat.toFixed(4)}, ${lng?.toFixed(4)}` : 'Pin Current Location'}
+              {lat ? `Pinned: ${lat.toFixed(4)}, ${lng?.toFixed(4)}` : 'Pin Location'}
             </button>
 
             <div className="flex gap-3">
@@ -286,6 +284,13 @@ export default function Clients() {
           </div>
         )}
       </div>
+
+      {showPinModal && (
+        <PinLocationModal
+          onConfirm={handlePinConfirm}
+          onClose={() => setShowPinModal(false)}
+        />
+      )}
     </div>
   );
 }

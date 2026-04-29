@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Trash2, CheckCircle, ClipboardList, PenTool, ChevronDown, ChevronUp, CheckSquare, Square } from 'lucide-react';
+import { Trash2, CheckCircle, ClipboardList, PenTool, ChevronDown, ChevronUp, CheckSquare, Square, Share2 } from 'lucide-react';
 import { v4 as uuid } from 'uuid';
 import { supabase } from '../lib/supabase';
 import { recalculateClientBalance } from '../db/database';
 import { useSignatureUpload } from '../hooks/useSignatureUpload';
-import { formatPeso } from '../utils/currency';
+import { formatPeso, formatDate } from '../utils/currency';
 import PageHeader from '../components/layout/PageHeader';
 import SignaturePad from '../components/signature/SignaturePad';
 import NetworkBadge from '../components/shared/NetworkBadge';
@@ -17,7 +17,8 @@ import type { Client, Disbursement, Payment } from '../types';
 
 export default function Collect() {
   const navigate = useNavigate();
-  const { processSignature, canSave } = useSignatureUpload();
+  const { processSignature, driveConnected } = useSignatureUpload();
+  const [namePrompt, setNamePrompt] = useState<{ itemId: string; value: string } | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [saving, setSaving] = useState(false);
   const [signingItemId, setSigningItemId] = useState<string | null>(null);
@@ -132,10 +133,6 @@ export default function Collect() {
   };
 
   const handleStartCollect = (itemId: string) => {
-    if (!canSave) {
-      toast.error('Connect Google Drive first in Settings to save signatures.');
-      return;
-    }
     const item = items?.find(i => i.id === itemId);
     if (!item) return;
     const effectiveMax = getEffectiveMax(item);
@@ -145,7 +142,17 @@ export default function Collect() {
       toast.error(`Amount cannot exceed outstanding balance of ${formatPeso(effectiveMax)}`);
       return;
     }
+    if (!driveConnected) {
+      setNamePrompt({ itemId, value: '' });
+      return;
+    }
     setSigningItemId(itemId);
+  };
+
+  const handleNamePromptConfirm = () => {
+    if (!namePrompt?.value.trim()) return;
+    setSigningItemId(namePrompt.itemId);
+    setNamePrompt(null);
   };
 
   const handleClearList = async () => {
@@ -158,6 +165,34 @@ export default function Collect() {
     } catch (err) {
       toast.error('Failed to clear collection list');
       console.error(err);
+    }
+  };
+
+  const handleShareList = () => {
+    if (pendingItems.length === 0) {
+      toast.error('No pending items to share');
+      return;
+    }
+    const payload = pendingItems.map(item => {
+      const client = clientsMap[item.client_id];
+      return {
+        id: item.id,
+        name: client?.name ?? 'Unknown',
+        contact: client?.contact_number ?? '',
+        address: client?.address ?? '',
+        balance: getEffectiveMax(item),
+        lat: client?.latitude,
+        lng: client?.longitude,
+        collectorName: '',
+      };
+    });
+    const encoded = btoa(JSON.stringify(payload));
+    const url = `${window.location.origin}/collect?share=${encoded}`;
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(url);
+      toast.success('Collection link copied! Share it with your collector.');
+    } else {
+      toast('Could not copy. Open the URL from the address bar.');
     }
   };
 
@@ -231,9 +266,7 @@ export default function Collect() {
 
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
-      if (msg === 'NOT_CONNECTED') {
-        toast.error('Connect Google Drive first in Settings.');
-      } else if (msg === 'OFFLINE') {
+      if (msg === 'OFFLINE') {
         toast.error('No internet connection. Please try again when online.');
       } else {
         toast.error('Failed to process collection');
@@ -299,10 +332,6 @@ export default function Collect() {
   };
 
   const handleCollectSelected = () => {
-    if (!canSave) {
-      toast.error('Connect Google Drive first in Settings to save signatures.');
-      return;
-    }
     const queue = pendingItems
       .filter(i => selectedIds.has(i.id))
       .filter(i => {
@@ -328,6 +357,49 @@ export default function Collect() {
     setIsBulkCollecting(false);
   };
 
+  // Name prompt when Drive is not connected
+  if (namePrompt) {
+    const promptItem = items?.find(i => i.id === namePrompt.itemId);
+    const promptClient = promptItem ? clientsMap?.[promptItem.client_id] : null;
+    return (
+      <div className="fixed inset-0 z-50 bg-gray-50 flex flex-col items-center justify-center p-6">
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 w-full max-w-sm space-y-4">
+          <div className="text-center">
+            <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide mb-1">Google Drive not connected</p>
+            <h2 className="text-base font-bold text-gray-900">Confirm Client Name</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              Ask <span className="font-semibold">{promptClient?.name}</span> to type their full name to proceed.
+            </p>
+          </div>
+          <input
+            type="text"
+            autoFocus
+            value={namePrompt.value}
+            onChange={e => setNamePrompt(p => p ? { ...p, value: e.target.value } : p)}
+            onKeyDown={e => { if (e.key === 'Enter') handleNamePromptConfirm(); }}
+            placeholder="Client's full name"
+            className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <div className="flex gap-3">
+            <button
+              onClick={() => setNamePrompt(null)}
+              className="flex-1 py-3 rounded-xl border border-gray-300 text-gray-700 text-sm font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              disabled={!namePrompt.value.trim()}
+              onClick={handleNamePromptConfirm}
+              className="flex-1 py-3 rounded-xl bg-blue-600 text-white text-sm font-semibold disabled:opacity-40"
+            >
+              Proceed
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Full-screen signature
   if (signingItemId) {
     const sigItem = items?.find(i => i.id === signingItemId);
@@ -337,11 +409,12 @@ export default function Collect() {
     const bulkProgress = isBulkCollecting
       ? `(${bulkQueue.indexOf(signingItemId) + 1} of ${bulkQueue.length})`
       : '';
+    const displayName = sigClient?.name ?? 'Unknown';
     return (
       <div>
         {sigClient && (
           <div className="fixed top-0 left-0 right-0 z-[60] bg-blue-600 text-white px-4 py-2 text-center">
-            <p className="text-sm font-semibold">{sigClient.name} {bulkProgress}</p>
+            <p className="text-sm font-semibold">{displayName} {bulkProgress}</p>
             <p className="text-xs text-blue-200">Collecting {formatPeso(sigAmount)}</p>
           </div>
         )}
@@ -349,6 +422,8 @@ export default function Collect() {
           <SignaturePad
             onConfirm={handleSignatureConfirm}
             onCancel={isBulkCollecting ? handleCancelBulk : () => setSigningItemId(null)}
+            clientName={displayName}
+            amount={formatPeso(sigAmount)}
           />
         </div>
         {saving && (
@@ -406,6 +481,14 @@ export default function Collect() {
           >
             + Add from Unpaid
           </button>
+          {pendingItems.length > 0 && (
+            <button
+              onClick={handleShareList}
+              className="flex items-center justify-center gap-1 px-4 py-3 rounded-xl bg-blue-600 text-white text-sm font-medium"
+            >
+              <Share2 size={14} /> Share
+            </button>
+          )}
           {(items?.length ?? 0) > 0 && (
             !confirmClear ? (
               <button
@@ -520,7 +603,7 @@ export default function Collect() {
                                     <div key={d.id} className="bg-blue-50 rounded-lg px-3 py-2 flex items-center justify-between">
                                       <div className="flex items-center gap-2">
                                         <NetworkBadge network={d.network} />
-                                        <span className="text-xs text-gray-600">{d.date}</span>
+                                        <span className="text-xs text-gray-600">{formatDate(d.date)}</span>
                                       </div>
                                       <span className="text-xs font-semibold text-blue-700">+{formatPeso(d.selling_price)}</span>
                                     </div>
@@ -529,7 +612,7 @@ export default function Collect() {
                                     <div key={d.id} className="bg-gray-50 rounded-lg px-3 py-2 flex items-center justify-between opacity-60">
                                       <div className="flex items-center gap-2">
                                         <StatusBadge status={d.status} />
-                                        <span className="text-xs text-gray-500">{d.date}</span>
+                                        <span className="text-xs text-gray-500">{formatDate(d.date)}</span>
                                       </div>
                                       <span className="text-xs text-gray-500 line-through">{formatPeso(d.selling_price)}</span>
                                     </div>
@@ -549,7 +632,7 @@ export default function Collect() {
                                     <div key={p.id} className="bg-green-50 rounded-lg px-3 py-2 flex items-center justify-between">
                                       <div className="flex items-center gap-2">
                                         <PaymentMethodBadge method={p.method} />
-                                        <span className="text-xs text-gray-600">{p.date}</span>
+                                        <span className="text-xs text-gray-600">{formatDate(p.date)}</span>
                                       </div>
                                       <span className="text-xs font-semibold text-green-700">-{formatPeso(p.amount)}</span>
                                     </div>

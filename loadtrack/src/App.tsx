@@ -17,12 +17,50 @@ import Transactions from './pages/Transactions';
 import Collect from './pages/Collect';
 import Expenses from './pages/Expenses';
 import Settings from './pages/Settings';
+import CollectorView, { CollectorNameGate } from './pages/CollectorView';
+import type { CollectorClient } from './pages/CollectorView';
 import { getSettingsWithDefaults } from './db/database';
 import { migrateFromDexieIfNeeded } from './utils/migrateFromDexie';
 import { DarkModeProvider } from './contexts/DarkModeContext';
 import { GoogleDriveProvider } from './contexts/GoogleDriveContext';
 
+function CollectorEntry() {
+  const params = new URLSearchParams(window.location.search);
+  const encoded = params.get('share');
+  const [collectorName, setCollectorName] = useState<string | null>(null);
+
+  if (!encoded) return null;
+
+  let clients: CollectorClient[] = [];
+  try {
+    clients = JSON.parse(atob(encoded));
+  } catch {
+    return <div className="min-h-screen flex items-center justify-center text-sm text-red-500 p-6">Invalid collection link.</div>;
+  }
+
+  if (!collectorName) {
+    return <CollectorNameGate onConfirm={setCollectorName} />;
+  }
+
+  const withName = clients.map(c => ({ ...c, collectorName }));
+  return (
+    <div>
+      <CollectorView clients={withName} />
+      <Toaster position="top-center" toastOptions={{ duration: 2000, style: { fontSize: '14px', borderRadius: '12px' } }} />
+    </div>
+  );
+}
+
 export default function App() {
+  // Collector share link — bypass PIN entirely
+  if (window.location.pathname === '/collect' && new URLSearchParams(window.location.search).has('share')) {
+    return <CollectorEntry />;
+  }
+
+  return <AppMain />;
+}
+
+function AppMain() {
   const [ready, setReady] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
   const [pin, setPin] = useState('0000');

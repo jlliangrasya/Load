@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { SendHorizonal, Wallet, X, Search, Trash2, Share2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { formatPeso } from '../utils/currency';
+import { formatPeso, formatDate } from '../utils/currency';
 import { generateClientStatement, shareClientStatement } from '../utils/statement';
 import { useDisbursements } from '../hooks/useDisbursements';
 import { usePayments } from '../hooks/usePayments';
@@ -244,7 +244,7 @@ export default function ClientDetail() {
                           <StatusBadge status={d.status} />
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-xs text-gray-500">{d.date}</span>
+                          <span className="text-xs text-gray-500">{formatDate(d.date)}</span>
                           <button
                             onClick={() => setConfirmDeleteDisbursement(d.id)}
                             className="p-1 text-gray-400"
@@ -319,7 +319,7 @@ export default function ClientDetail() {
                       <div className="flex items-center justify-between mb-1">
                         <PaymentMethodBadge method={p.method} />
                         <div className="flex items-center gap-2">
-                          <span className="text-xs text-gray-500">{p.date}</span>
+                          <span className="text-xs text-gray-500">{formatDate(p.date)}</span>
                           <button
                             onClick={() => setConfirmDeletePayment(p.id)}
                             className="p-1 text-gray-400"
@@ -382,7 +382,7 @@ export default function ClientDetail() {
             </div>
             <div className="p-4">
               <div className="text-center mb-3">
-                <p className="text-xs text-gray-500">{signatureModal.date}</p>
+                <p className="text-xs text-gray-500">{formatDate(signatureModal.date)}</p>
                 <p className="text-lg font-bold text-green-600">{formatPeso(signatureModal.amount)}</p>
               </div>
               <div className="border border-gray-200 rounded-xl p-2 bg-gray-50">

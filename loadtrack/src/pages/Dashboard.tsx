@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Users, AlertCircle, TrendingUp, SendHorizonal, Wallet } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { formatPeso } from '../utils/currency';
+import { formatPeso, formatDate } from '../utils/currency';
 import PageHeader from '../components/layout/PageHeader';
 import StatCard from '../components/shared/StatCard';
 import NetworkBadge from '../components/shared/NetworkBadge';
@@ -164,7 +164,7 @@ export default function Dashboard() {
                     </div>
                     <div className="text-right">
                       <p className="text-sm font-semibold text-gray-900">{formatPeso(d.selling_price)}</p>
-                      <p className="text-xs text-gray-500">{d.date}</p>
+                      <p className="text-xs text-gray-500">{formatDate(d.date)}</p>
                     </div>
                   </div>
                 ))}
@@ -191,7 +191,7 @@ export default function Dashboard() {
                     </div>
                     <div className="text-right">
                       <p className="text-sm font-semibold text-green-600">{formatPeso(p.amount)}</p>
-                      <p className="text-xs text-gray-500">{p.date}</p>
+                      <p className="text-xs text-gray-500">{formatDate(p.date)}</p>
                     </div>
                   </div>
                 ))}

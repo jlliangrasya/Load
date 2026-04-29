@@ -8,6 +8,7 @@ import { getSettingsWithDefaults, updateSettings } from '../db/database';
 import { supabase } from '../lib/supabase';
 import { exportClientsXlsx } from '../utils/exportXlsx';
 import { exportBackup, importBackup, downloadBackup } from '../utils/backup';
+import { formatDate } from '../utils/currency';
 import PageHeader from '../components/layout/PageHeader';
 import toast from 'react-hot-toast';
 
@@ -365,7 +366,7 @@ export default function Settings() {
                       <span className={`text-xs font-semibold ${log.network === 'smart' ? 'text-blue-600' : 'text-red-600'}`}>
                         {log.network === 'smart' ? 'Smart' : 'Globe'}
                       </span>
-                      <span className="text-xs text-gray-500">{log.date}</span>
+                      <span className="text-xs text-gray-500">{formatDate(log.date)}</span>
                     </div>
                     <p className="text-xs text-gray-600 mt-0.5">₱{log.old_rate} → ₱{log.new_rate}</p>
                   </div>

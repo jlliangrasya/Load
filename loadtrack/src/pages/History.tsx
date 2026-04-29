@@ -3,7 +3,7 @@ import { Search, Filter, X, FileDown, FileSpreadsheet, Trash2 } from 'lucide-rea
 import { useDisbursements } from '../hooks/useDisbursements';
 import { usePayments } from '../hooks/usePayments';
 import { useClients } from '../hooks/useClients';
-import { formatPeso } from '../utils/currency';
+import { formatPeso, formatDate } from '../utils/currency';
 import { exportDisbursementsPdf, exportPaymentsPdf, exportPaymentReceipt } from '../utils/exportPdf';
 import { exportDisbursementsXlsx, exportPaymentsXlsx } from '../utils/exportXlsx';
 import PageHeader from '../components/layout/PageHeader';
@@ -300,7 +300,7 @@ export default function History() {
                       {clientsMap?.[d.client_id]?.name ?? 'Unknown'}
                     </p>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-500">{d.date}</span>
+                      <span className="text-xs text-gray-500">{formatDate(d.date)}</span>
                       <button
                         onClick={() => setConfirmDeleteId(d.id)}
                         className="p-1 text-gray-400"
@@ -360,7 +360,7 @@ export default function History() {
                       {clientsMap?.[p.client_id]?.name ?? 'Unknown'}
                     </p>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-500">{p.date}</span>
+                      <span className="text-xs text-gray-500">{formatDate(p.date)}</span>
                       <button
                         onClick={() => setConfirmDeleteId(p.id)}
                         className="p-1 text-gray-400"
@@ -430,7 +430,7 @@ export default function History() {
             </div>
             <div className="p-4">
               <div className="text-center mb-3">
-                <p className="text-xs text-gray-500">{signatureModal.date}</p>
+                <p className="text-xs text-gray-500">{formatDate(signatureModal.date)}</p>
                 <p className="text-lg font-bold text-green-600">{formatPeso(signatureModal.amount)}</p>
               </div>
               <div className="border border-gray-200 rounded-xl p-2 bg-gray-50">

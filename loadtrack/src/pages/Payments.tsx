@@ -5,7 +5,7 @@ import { useClients } from '../hooks/useClients';
 import { usePayments } from '../hooks/usePayments';
 import { supabase } from '../lib/supabase';
 import { useSignatureUpload } from '../hooks/useSignatureUpload';
-import { formatPeso } from '../utils/currency';
+import { formatPeso, formatDate } from '../utils/currency';
 import type { Disbursement } from '../types';
 import PageHeader from '../components/layout/PageHeader';
 import NetworkBadge from '../components/shared/NetworkBadge';
@@ -18,7 +18,9 @@ export default function Payments() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { addPayment } = usePayments();
-  const { processSignature, canSave } = useSignatureUpload();
+  const { processSignature, driveConnected } = useSignatureUpload();
+  const [namePrompt, setNamePrompt] = useState(false);
+  const [confirmedClientName, setConfirmedClientName] = useState('');
 
   const { clients } = useClients();
 
@@ -72,10 +74,6 @@ export default function Payments() {
   };
 
   const handleProceedToSignature = () => {
-    if (!canSave) {
-      toast.error('Connect Google Drive first in Settings to save signatures.');
-      return;
-    }
     if (!clientId) { toast.error('Please select a client'); return; }
     const amt = parseFloat(amount);
     if (!amt || amt <= 0) { toast.error('Please enter a valid amount'); return; }
@@ -87,6 +85,17 @@ export default function Payments() {
       toast.error('Please enter a reference number');
       return;
     }
+    if (!driveConnected) {
+      setConfirmedClientName('');
+      setNamePrompt(true);
+      return;
+    }
+    setShowSignature(true);
+  };
+
+  const handleNamePromptConfirm = () => {
+    if (!confirmedClientName.trim()) return;
+    setNamePrompt(false);
     setShowSignature(true);
   };
 
@@ -94,7 +103,8 @@ export default function Payments() {
     setSaving(true);
     try {
       const amt = parseFloat(amount);
-      const signatureRef = await processSignature(signatureDataUrl, selectedClient?.name ?? 'unknown', 'payment');
+      const nameForSig = driveConnected ? (selectedClient?.name ?? 'unknown') : confirmedClientName;
+      const signatureRef = await processSignature(signatureDataUrl, nameForSig, 'payment');
       await addPayment({
         client_id: clientId,
         date,
@@ -105,14 +115,12 @@ export default function Payments() {
         disbursement_ids: selectedDisbursementIds.length > 0 ? selectedDisbursementIds : undefined,
         notes: notes.trim() || undefined,
       });
-      toast.success('Payment saved! Signature backed up to Drive.');
+      toast.success(driveConnected ? 'Payment saved! Signature backed up to Drive.' : 'Payment saved!');
       setShowSignature(false);
       navigate('/');
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
-      if (msg === 'NOT_CONNECTED') {
-        toast.error('Connect Google Drive first in Settings.');
-      } else if (msg === 'OFFLINE') {
+      if (msg === 'OFFLINE') {
         toast.error('No internet connection. Please try again when online.');
       } else {
         toast.error('Failed to save payment. Please try again.');
@@ -123,13 +131,56 @@ export default function Payments() {
     }
   };
 
+  // Name prompt when Drive is not connected
+  if (namePrompt) {
+    const clientDisplayName = selectedClient?.name ?? 'the client';
+    return (
+      <div className="fixed inset-0 z-50 bg-gray-50 flex flex-col items-center justify-center p-6">
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 w-full max-w-sm space-y-4">
+          <div className="text-center">
+            <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide mb-1">Google Drive not connected</p>
+            <h2 className="text-base font-bold text-gray-900">Confirm Client Name</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              Ask <span className="font-semibold">{clientDisplayName}</span> to type their full name to proceed.
+            </p>
+          </div>
+          <input
+            type="text"
+            autoFocus
+            value={confirmedClientName}
+            onChange={e => setConfirmedClientName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') handleNamePromptConfirm(); }}
+            placeholder="Client's full name"
+            className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <div className="flex gap-3">
+            <button
+              onClick={() => setNamePrompt(false)}
+              className="flex-1 py-3 rounded-xl border border-gray-300 text-gray-700 text-sm font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              disabled={!confirmedClientName.trim()}
+              onClick={handleNamePromptConfirm}
+              className="flex-1 py-3 rounded-xl bg-blue-600 text-white text-sm font-semibold disabled:opacity-40"
+            >
+              Proceed
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (showSignature) {
+    const sigClientName = driveConnected ? selectedClient?.name : confirmedClientName;
     return (
       <>
         <SignaturePad
           onConfirm={handleSignatureConfirm}
           onCancel={() => setShowSignature(false)}
-          clientName={selectedClient?.name}
+          clientName={sigClientName}
           amount={amount ? formatPeso(parseFloat(amount)) : undefined}
         />
         {saving && (
@@ -148,15 +199,6 @@ export default function Payments() {
       <PageHeader title="Record Payment" />
 
       <div className="p-4 space-y-4">
-        {!canSave && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
-            <span className="text-xl leading-none mt-0.5">&#9888;&#65039;</span>
-            <div>
-              <p className="text-sm font-semibold text-amber-800">Google Drive not connected</p>
-              <p className="text-xs text-amber-600 mt-1 leading-relaxed">You need to connect Google Drive before recording payments. Go to <span className="font-semibold">Settings</span> and tap <span className="font-semibold">"Sign in with Google"</span>.</p>
-            </div>
-          </div>
-        )}
         {/* Client Selection */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Client *</label>
@@ -272,7 +314,7 @@ export default function Payments() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs text-gray-500">{d.date}</span>
+                          <span className="text-xs text-gray-500">{formatDate(d.date)}</span>
                           <NetworkBadge network={d.network} />
                         </div>
                         <p className="text-sm font-semibold text-gray-900">{formatPeso(d.selling_price)}</p>

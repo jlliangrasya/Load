@@ -8,7 +8,7 @@ import { useClients } from '../hooks/useClients';
 import { useCapital } from '../hooks/useCapital';
 import { useDisbursements } from '../hooks/useDisbursements';
 import type { AppSettings, CapitalPurchase } from '../types';
-import { formatPeso } from '../utils/currency';
+import { formatPeso, formatDate } from '../utils/currency';
 import PageHeader from '../components/layout/PageHeader';
 import NetworkBadge from '../components/shared/NetworkBadge';
 import SignaturePad from '../components/signature/SignaturePad';
@@ -260,7 +260,7 @@ export default function Disburse() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <NetworkBadge network={network} />
-                <span className="text-xs text-gray-500">Batch: {availableBatch.date}</span>
+                <span className="text-xs text-gray-500">Batch: {formatDate(availableBatch.date)}</span>
               </div>
               <p className="text-sm font-semibold">{formatPeso(availableBatch.remaining_balance)} left</p>
             </div>

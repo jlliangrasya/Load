@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { format, startOfMonth, endOfMonth, parseISO } from 'date-fns';
 import { Plus, Trash2, ChevronLeft, ChevronRight, Receipt } from 'lucide-react';
 import { useExpenses } from '../hooks/useExpenses';
-import { formatPeso } from '../utils/currency';
+import { formatPeso, formatDate } from '../utils/currency';
 import PageHeader from '../components/layout/PageHeader';
 import EmptyState from '../components/shared/EmptyState';
 import toast from 'react-hot-toast';
@@ -198,7 +198,7 @@ export default function Expenses() {
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-orange-100 text-orange-700">
                       {e.category}
                     </span>
-                    <span className="text-xs text-gray-500">{e.date}</span>
+                    <span className="text-xs text-gray-500">{formatDate(e.date)}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-semibold text-orange-700">{formatPeso(e.amount)}</p>
